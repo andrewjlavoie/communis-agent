@@ -60,6 +60,7 @@ Options:
   --provider, -p    LLM provider: 'anthropic' or 'openai' (overrides env var)
   --base-url        Base URL for OpenAI-compatible API (overrides env var)
   --auto, -a        Skip feedback prompts, run straight through
+  --output, -o      Save session output to a markdown file
   --verbose, -v     Timing, file paths, token breakdown table
 ```
 

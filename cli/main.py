@@ -6,6 +6,7 @@ import os
 import signal
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
@@ -99,14 +100,84 @@ async def _cancel_workflow(handle: WorkflowHandle, verbose: bool) -> None:
         console.print(f"[red]Failed to cancel workflow: {e}[/red]")
 
 
+# --- Markdown output builder ---
+
+
+class MarkdownLog:
+    """Accumulates session output as markdown for --output."""
+
+    def __init__(self, idea: str, num_turns: int, model: str, provider: str):
+        self.parts: list[str] = []
+        self.parts.append(f"# autoRiff Session\n")
+        self.parts.append(f"**Prompt:** {idea}\n")
+        self.parts.append(
+            f"**Config:** {num_turns} turns | model: `{model}` | "
+            f"provider: {provider or 'env default'} | "
+            f"date: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}\n"
+        )
+
+    def add_planner(self, turn: int, total: int, role: str, reasoning: str):
+        self.parts.append(f"---\n\n## Turn {turn}/{total} — {role}\n")
+        if reasoning:
+            self.parts.append(f"*Planner reasoning: {reasoning}*\n")
+
+    def add_turn_output(self, turn: int, role: str, content: str | None, insights: list[str], usage: dict, truncated: bool):
+        if content:
+            self.parts.append(f"{content}\n")
+        else:
+            self.parts.append("*Content not available*\n")
+
+        if truncated:
+            self.parts.append("**WARNING: Output was truncated (hit max_tokens)**\n")
+
+        if insights:
+            self.parts.append("**Key Insights:**\n")
+            for i in insights:
+                self.parts.append(f"- {i}")
+            self.parts.append("")
+
+        in_tok = usage.get("input_tokens", 0)
+        out_tok = usage.get("output_tokens", 0)
+        self.parts.append(f"*Tokens: {in_tok:,} in / {out_tok:,} out*\n")
+
+    def add_status(self, status: str, message: str = ""):
+        if status == "complete":
+            self.parts.append("---\n\n**Status:** Complete\n")
+        elif status == "cancelled":
+            self.parts.append(f"---\n\n**Status:** Cancelled — {message}\n")
+        elif status == "error":
+            self.parts.append(f"---\n\n**Status:** Error — {message}\n")
+
+    def add_stats(self, turn_results: list[dict], elapsed: str):
+        total_in = sum(r.get("token_usage", {}).get("input_tokens", 0) for r in turn_results)
+        total_out = sum(r.get("token_usage", {}).get("output_tokens", 0) for r in turn_results)
+        self.parts.append("## Summary\n")
+        self.parts.append(f"| Turn | Role | Input | Output |")
+        self.parts.append(f"|------|------|------:|-------:|")
+        for r in turn_results:
+            u = r.get("token_usage", {})
+            trunc = " *" if r.get("truncated") else ""
+            self.parts.append(
+                f"| {r['turn_number']} | {r['role']}{trunc} | "
+                f"{u.get('input_tokens', 0):,} | {u.get('output_tokens', 0):,} |"
+            )
+        self.parts.append(f"| | **Total** | **{total_in:,}** | **{total_out:,}** |")
+        self.parts.append(f"\n*Elapsed: {elapsed}*\n")
+
+    def write(self, path: str):
+        Path(path).write_text("\n".join(self.parts))
+
+
 async def run_cli(
     idea: str, num_turns: int, model: str, auto: bool = False, verbose: bool = False,
-    provider: str = "", base_url: str = "",
+    provider: str = "", base_url: str = "", output: str = "",
 ):
     load_dotenv()
 
     address = os.getenv("TEMPORAL_ADDRESS", "localhost:7233")
     namespace = os.getenv("TEMPORAL_NAMESPACE", "default")
+
+    md_log = MarkdownLog(idea, num_turns, model, provider) if output else None
 
     console.print(Panel("[bold]autoRiff[/bold] — Self-Directing Work Loop", style="blue"))
     console.print(f"Prompt: [bold]{idea}[/bold]")
@@ -118,6 +189,9 @@ async def run_cli(
         console.print(f"[dim]Temporal: {address} (namespace: {namespace})[/dim]")
         console.print(f"[dim]Task queue: {TASK_QUEUE}[/dim]")
         console.print(f"[dim]Poll interval: {POLL_INTERVAL}s[/dim]")
+
+    if output:
+        console.print(f"[dim]Output: {output}[/dim]")
 
     console.print()
 
@@ -193,6 +267,13 @@ async def run_cli(
                 content, _ = _read_turn_file(artifact_path)
                 _display_turn_result(result, state["num_turns"], content, verbose, turn_elapsed)
 
+                if md_log:
+                    md_log.add_turn_output(
+                        result["turn_number"], result["role"], content,
+                        result.get("key_insights", []), result.get("token_usage", {}),
+                        result.get("truncated", False),
+                    )
+
                 if verbose and artifact_path:
                     console.print(f"[dim]  Artifact: {artifact_path}[/dim]")
 
@@ -224,6 +305,11 @@ async def run_cli(
                             f"[bold cyan]{parts[0].strip()}[/bold cyan]"
                             f"[dim] \u2014 {parts[1].strip()}[/dim]"
                         )
+                        # Log planner decision to markdown
+                        if md_log:
+                            turn_num = state.get("current_turn", 0)
+                            role = state.get("current_role", "")
+                            md_log.add_planner(turn_num, num_turns, role, parts[1].strip())
                     else:
                         console.print(f"[cyan]{current_msg}[/cyan]")
 
@@ -236,6 +322,8 @@ async def run_cli(
                 ws_dir = state.get("workspace_dir", "")
                 if ws_dir:
                     console.print(f"[dim]Workspace: {ws_dir}[/dim]")
+                if md_log:
+                    md_log.add_status("complete")
                 break
 
             elif status == "cancelled":
@@ -250,10 +338,14 @@ async def run_cli(
                 ws_dir = state.get("workspace_dir", "")
                 if ws_dir:
                     console.print(f"[dim]Workspace (partial): {ws_dir}[/dim]")
+                if md_log:
+                    md_log.add_status("cancelled", f"{turns_done}/{state['num_turns']} turns")
                 break
 
             elif status == "error":
                 console.print(f"[red]Error: {state['latest_message']}[/red]")
+                if md_log:
+                    md_log.add_status("error", state["latest_message"])
                 break
 
     # Get final result
@@ -261,6 +353,9 @@ async def run_cli(
         final = await handle.result()
         turn_results = final.get("turn_results", [])
         _print_final_stats(turn_results, verbose, session_start, poll_count)
+
+        if md_log:
+            md_log.add_stats(turn_results, _elapsed(session_start))
     except asyncio.CancelledError:
         # Workflow was cancelled — still show partial stats from last known state
         if verbose:
@@ -272,6 +367,11 @@ async def run_cli(
             pass
         else:
             console.print(f"[red]Workflow error: {e}[/red]")
+
+    # Write markdown output
+    if md_log and output:
+        md_log.write(output)
+        console.print(f"[dim]Output saved to: {output}[/dim]")
 
 
 def _print_final_stats(
@@ -430,6 +530,11 @@ def main():
         default="",
         help="Base URL for OpenAI-compatible API (overrides OPENAI_BASE_URL env var)",
     )
+    parser.add_argument(
+        "--output", "-o",
+        default="",
+        help="Save session output to a markdown file (e.g. --output result.md)",
+    )
     args = parser.parse_args()
 
     if args.turns < 1:
@@ -439,7 +544,10 @@ def main():
         console.print("[red]Error: turns must be at most 10[/red]")
         return
 
-    asyncio.run(run_cli(args.idea, args.turns, args.model, args.auto, args.verbose, args.provider, args.base_url))
+    asyncio.run(run_cli(
+        args.idea, args.turns, args.model, args.auto, args.verbose,
+        args.provider, args.base_url, args.output,
+    ))
 
 
 if __name__ == "__main__":
