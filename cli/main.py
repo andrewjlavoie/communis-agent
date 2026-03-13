@@ -17,8 +17,9 @@ from rich.panel import Panel
 from rich.table import Table
 from temporalio.client import Client, WorkflowHandle
 
-from models.data_types import RiffConfig
+from models.data_types import DEFAULT_MAX_TURNS, RiffConfig
 from workflows.riff_orchestrator import RiffOrchestratorWorkflow
+from workflows.riff_turn import RiffTurnWorkflow
 
 TASK_QUEUE = "autoriff-task-queue"
 POLL_INTERVAL = 1.5
@@ -106,18 +107,21 @@ async def _cancel_workflow(handle: WorkflowHandle, verbose: bool) -> None:
 class MarkdownLog:
     """Accumulates session output as markdown for --output."""
 
-    def __init__(self, idea: str, num_turns: int, model: str, provider: str):
+    def __init__(self, idea: str, max_turns: int, model: str, provider: str, goal_detect: bool):
         self.parts: list[str] = []
         self.parts.append(f"# autoRiff Session\n")
         self.parts.append(f"**Prompt:** {idea}\n")
+        mode = "goal-detect" if goal_detect else f"fixed {max_turns} steps"
+        if max_turns == 0:
+            mode = f"indefinite (max {DEFAULT_MAX_TURNS})"
         self.parts.append(
-            f"**Config:** {num_turns} turns | model: `{model}` | "
+            f"**Config:** {mode} | model: `{model}` | "
             f"provider: {provider or 'env default'} | "
             f"date: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}\n"
         )
 
-    def add_planner(self, turn: int, total: int, role: str, reasoning: str):
-        self.parts.append(f"---\n\n## Turn {turn}/{total} — {role}\n")
+    def add_planner(self, turn: int, max_turns: int, role: str, reasoning: str):
+        self.parts.append(f"---\n\n## Step {turn} — {role}\n")
         if reasoning:
             self.parts.append(f"*Planner reasoning: {reasoning}*\n")
 
@@ -152,7 +156,7 @@ class MarkdownLog:
         total_in = sum(r.get("token_usage", {}).get("input_tokens", 0) for r in turn_results)
         total_out = sum(r.get("token_usage", {}).get("output_tokens", 0) for r in turn_results)
         self.parts.append("## Summary\n")
-        self.parts.append(f"| Turn | Role | Input | Output |")
+        self.parts.append(f"| Step | Role | Input | Output |")
         self.parts.append(f"|------|------|------:|-------:|")
         for r in turn_results:
             u = r.get("token_usage", {})
@@ -169,21 +173,41 @@ class MarkdownLog:
 
 
 async def run_cli(
-    idea: str, num_turns: int, model: str, auto: bool = False, verbose: bool = False,
-    provider: str = "", base_url: str = "", output: str = "",
+    idea: str, max_turns: int, model: str, auto: bool = False, verbose: bool = False,
+    provider: str = "", base_url: str = "", output: str = "", dangerous: bool = False,
+    goal_complete_detection: bool = True, max_subagents: int = 3,
 ):
     load_dotenv()
 
     address = os.getenv("TEMPORAL_ADDRESS", "localhost:7233")
     namespace = os.getenv("TEMPORAL_NAMESPACE", "default")
 
-    md_log = MarkdownLog(idea, num_turns, model, provider) if output else None
+    effective_max = max_turns if max_turns > 0 else DEFAULT_MAX_TURNS
+    md_log = MarkdownLog(idea, max_turns, model, provider, goal_complete_detection) if output else None
 
     console.print(Panel("[bold]autoRiff[/bold] — Self-Directing Work Loop", style="blue"))
     console.print(f"Prompt: [bold]{idea}[/bold]")
-    mode = "auto (no feedback prompts)" if auto else "interactive"
+    mode_parts = []
+    if auto:
+        mode_parts.append("auto")
+    if dangerous:
+        mode_parts.append("DANGEROUS (tool auto-approve)")
+    if goal_complete_detection:
+        mode_parts.append("goal-detect")
+    mode = ", ".join(mode_parts) if mode_parts else "interactive"
     provider_label = provider or "env default"
-    console.print(f"Turns: {num_turns} | Model: {model} | Provider: {provider_label} | Mode: {mode}")
+
+    # Build turns display
+    if max_turns == 0:
+        turns_display = f"indefinite (max {DEFAULT_MAX_TURNS})"
+    elif goal_complete_detection:
+        turns_display = f"up to {max_turns}"
+    else:
+        turns_display = f"fixed {max_turns}"
+
+    console.print(f"Steps: {turns_display} | Model: {model} | Provider: {provider_label} | Mode: {mode}")
+    if max_subagents > 0:
+        console.print(f"[dim]Sub-agents: up to {max_subagents} parallel[/dim]")
 
     if verbose:
         console.print(f"[dim]Temporal: {address} (namespace: {namespace})[/dim]")
@@ -210,7 +234,12 @@ async def run_cli(
 
     # Start the orchestrator workflow
     workflow_id = f"autoriff-{uuid.uuid4().hex[:8]}"
-    config = RiffConfig(idea=idea, num_turns=num_turns, model=model, auto=auto, provider=provider, base_url=base_url)
+    config = RiffConfig(
+        idea=idea, max_turns=max_turns, model=model, auto=auto,
+        provider=provider, base_url=base_url, dangerous=dangerous,
+        goal_complete_detection=goal_complete_detection,
+        max_subagents=max_subagents,
+    )
 
     handle = await client.start_workflow(
         RiffOrchestratorWorkflow.run,
@@ -256,6 +285,22 @@ async def run_cli(
             if status == last_status:
                 console.print(f"[dim]  [{_elapsed(session_start)}] {current_msg}[/dim]")
 
+        # Poll child workflow for pending tool approval (non-dangerous mode only)
+        if (
+            status == "running"
+            and not dangerous
+            and state.get("current_turn", 0) > 0
+        ):
+            child_id = f"{workflow_id}-turn-{state['current_turn']}"
+            try:
+                child_handle = client.get_workflow_handle(child_id)
+                pending = await child_handle.query(RiffTurnWorkflow.get_pending_tool)
+                if pending:
+                    approved = _prompt_for_tool_approval(pending["command"])
+                    await child_handle.signal(RiffTurnWorkflow.approve_tool, approved)
+            except Exception:
+                pass  # Child not started yet or already completed
+
         # Display new turn results — read content from workspace files
         for result in state["turn_results"]:
             if result["turn_number"] > last_turn_displayed:
@@ -265,7 +310,7 @@ async def run_cli(
                 last_turn_displayed = result["turn_number"]
                 artifact_path = result.get("artifact_path", "")
                 content, _ = _read_turn_file(artifact_path)
-                _display_turn_result(result, state["num_turns"], content, verbose, turn_elapsed)
+                _display_turn_result(result, effective_max, content, verbose, turn_elapsed)
 
                 if md_log:
                     md_log.add_turn_output(
@@ -309,7 +354,7 @@ async def run_cli(
                         if md_log:
                             turn_num = state.get("current_turn", 0)
                             role = state.get("current_role", "")
-                            md_log.add_planner(turn_num, num_turns, role, parts[1].strip())
+                            md_log.add_planner(turn_num, effective_max, role, parts[1].strip())
                     else:
                         console.print(f"[cyan]{current_msg}[/cyan]")
 
@@ -318,7 +363,10 @@ async def run_cli(
 
             elif status == "complete":
                 console.print()
-                console.print(Panel("[bold green]All turns complete![/bold green]", style="green"))
+                if state.get("goal_complete"):
+                    console.print(Panel("[bold green]Goal complete![/bold green]", style="green"))
+                else:
+                    console.print(Panel("[bold green]All steps complete![/bold green]", style="green"))
                 ws_dir = state.get("workspace_dir", "")
                 if ws_dir:
                     console.print(f"[dim]Workspace: {ws_dir}[/dim]")
@@ -331,7 +379,7 @@ async def run_cli(
                 turns_done = len(state.get("turn_results", []))
                 console.print(
                     Panel(
-                        f"[bold yellow]Workflow cancelled after {turns_done}/{state['num_turns']} turns.[/bold yellow]",
+                        f"[bold yellow]Workflow cancelled after {turns_done} steps.[/bold yellow]",
                         style="yellow",
                     )
                 )
@@ -339,7 +387,7 @@ async def run_cli(
                 if ws_dir:
                     console.print(f"[dim]Workspace (partial): {ws_dir}[/dim]")
                 if md_log:
-                    md_log.add_status("cancelled", f"{turns_done}/{state['num_turns']} turns")
+                    md_log.add_status("cancelled", f"{turns_done} steps")
                 break
 
             elif status == "error":
@@ -397,7 +445,7 @@ ROLE_COLORS = ["blue", "yellow", "magenta", "cyan", "green", "red", "bright_blue
 
 def _display_turn_result(
     result: dict,
-    total_turns: int,
+    max_turns: int,
     content: str | None,
     verbose: bool = False,
     turn_elapsed: str = "",
@@ -413,6 +461,9 @@ def _display_turn_result(
     in_tok = usage.get("input_tokens", 0)
     out_tok = usage.get("output_tokens", 0)
     subtitle_parts = [f"tokens: {in_tok:,} in / {out_tok:,} out"]
+    tool_calls = result.get("tool_calls_made", 0)
+    if tool_calls > 0:
+        subtitle_parts.append(f"tool calls: {tool_calls}")
     if turn_elapsed:
         subtitle_parts.append(turn_elapsed)
     if truncated:
@@ -421,10 +472,15 @@ def _display_turn_result(
 
     display_content = content or "[dim]Content not available[/dim]"
 
+    if max_turns > 0:
+        title = f"[bold]Step {turn}/{max_turns} — {role}[/bold]"
+    else:
+        title = f"[bold]Step {turn} — {role}[/bold]"
+
     console.print(
         Panel(
             Markdown(display_content),
-            title=f"[bold]Turn {turn}/{total_turns} — {role}[/bold]",
+            title=title,
             subtitle=f"[dim]{subtitle}[/dim]",
             border_style=color,
             padding=(1, 2),
@@ -433,7 +489,7 @@ def _display_turn_result(
 
     if truncated:
         console.print(
-            f"[bold red]Warning: Turn {turn} output was truncated (hit max_tokens). "
+            f"[bold red]Warning: Step {turn} output was truncated (hit max_tokens). "
             "The content above is incomplete.[/bold red]"
         )
 
@@ -455,7 +511,7 @@ def _print_summary_table(
     total_output: int,
 ):
     table = Table(title="Session Summary", show_lines=False, border_style="dim")
-    table.add_column("Turn", style="bold", justify="right")
+    table.add_column("Step", style="bold", justify="right")
     table.add_column("Role")
     table.add_column("Input Tokens", justify="right")
     table.add_column("Output Tokens", justify="right")
@@ -487,6 +543,29 @@ def _print_summary_table(
     console.print(table)
 
 
+def _prompt_for_tool_approval(command: str) -> bool:
+    """Prompt user to approve or deny a tool call."""
+    console.print()
+    console.print(
+        Panel(
+            f"[bold]{command}[/bold]",
+            title="[yellow]Tool Call Pending Approval[/yellow]",
+            border_style="yellow",
+        )
+    )
+    console.print("[bold]Approve?[/bold] (y/n): ", end="")
+    try:
+        response = input().strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        return False
+    approved = response in ("y", "yes", "")
+    if approved:
+        console.print("[dim]Approved.[/dim]")
+    else:
+        console.print("[dim]Denied.[/dim]")
+    return approved
+
+
 def _prompt_for_feedback() -> str | None:
     console.print(
         "[bold]Feedback?[/bold] Enter your feedback, or press Enter to skip:"
@@ -504,7 +583,8 @@ def main():
     )
     parser.add_argument("idea", metavar="prompt", help="The prompt or task to work on")
     parser.add_argument(
-        "--turns", "-t", type=int, default=3, help="Number of riff turns (default: 3)"
+        "--turns", "-t", type=int, default=0,
+        help="Max steps (0 = indefinite with goal detection, default: 0)",
     )
     parser.add_argument(
         "--model",
@@ -535,18 +615,36 @@ def main():
         default="",
         help="Save session output to a markdown file (e.g. --output result.md)",
     )
+    parser.add_argument(
+        "--dangerous",
+        action="store_true",
+        help="Auto-approve all tool calls without human confirmation (use with caution!)",
+    )
+    parser.add_argument(
+        "--no-goal-detect",
+        action="store_true",
+        help="Disable goal completion detection (requires --turns > 0)",
+    )
+    parser.add_argument(
+        "--max-subagents",
+        type=int,
+        default=3,
+        help="Max parallel sub-agents (0 = disabled, default: 3, max: 5)",
+    )
     args = parser.parse_args()
 
-    if args.turns < 1:
-        console.print("[red]Error: turns must be at least 1[/red]")
+    # Validation
+    if args.no_goal_detect and args.turns <= 0:
+        console.print("[red]Error: --no-goal-detect requires --turns > 0[/red]")
         return
-    if args.turns > 10:
-        console.print("[red]Error: turns must be at most 10[/red]")
-        return
+
+    max_subagents = max(0, min(5, args.max_subagents))
+    goal_detect = not args.no_goal_detect
 
     asyncio.run(run_cli(
         args.idea, args.turns, args.model, args.auto, args.verbose,
-        args.provider, args.base_url, args.output,
+        args.provider, args.base_url, args.output, args.dangerous,
+        goal_detect, max_subagents,
     ))
 
 

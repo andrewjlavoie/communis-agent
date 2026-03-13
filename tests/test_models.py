@@ -1,14 +1,16 @@
 """Tests for data models — serialization round-trips and state management."""
 
-from models.data_types import RiffConfig, RiffState, TurnConfig, TurnResult
+from models.data_types import RiffConfig, RiffState, SubAgentResult, SubAgentTask, TurnConfig, TurnResult
 
 
 def test_riff_config_defaults():
     config = RiffConfig(idea="test idea")
     assert config.idea == "test idea"
-    assert config.num_turns == 3
+    assert config.max_turns == 0
     assert config.model == "claude-sonnet-4-5-20250929"
     assert config.auto is False
+    assert config.goal_complete_detection is True
+    assert config.max_subagents == 3
 
 
 def test_turn_config_defaults():
@@ -18,7 +20,7 @@ def test_turn_config_defaults():
         role="Explorer",
         instructions="Explore the idea broadly.",
         turn_number=1,
-        total_turns=3,
+        max_turns=3,
     )
     assert config.user_feedback == ""
     assert config.max_tokens == 0
@@ -36,7 +38,7 @@ def test_turn_result_defaults():
 def test_riff_state_to_dict():
     state = RiffState(
         idea="test idea",
-        num_turns=3,
+        max_turns=3,
         current_turn=1,
         current_role="Explorer",
         status="running",
@@ -44,10 +46,11 @@ def test_riff_state_to_dict():
     )
     d = state.to_dict()
     assert d["idea"] == "test idea"
-    assert d["num_turns"] == 3
+    assert d["max_turns"] == 3
     assert d["status"] == "running"
     assert d["turn_results"] == []
     assert d["workspace_dir"] == "/tmp/test-ws"
+    assert d["goal_complete"] is False
 
 
 def test_riff_state_with_turn_results():
@@ -74,8 +77,22 @@ def test_turn_config_with_feedback():
         role="Devil's Advocate",
         instructions="Challenge the assumptions from the exploration.",
         turn_number=2,
-        total_turns=3,
+        max_turns=3,
         user_feedback="Focus on mobile",
     )
     assert config.user_feedback == "Focus on mobile"
     assert config.role == "Devil's Advocate"
+
+
+def test_subagent_task_defaults():
+    task = SubAgentTask(task="Research API docs")
+    assert task.task == "Research API docs"
+    assert task.max_turns == 5
+
+
+def test_subagent_result_defaults():
+    result = SubAgentResult(task="Do something", status="complete", summary="Done")
+    assert result.task == "Do something"
+    assert result.status == "complete"
+    assert result.turn_results == []
+    assert result.workspace_dir == ""

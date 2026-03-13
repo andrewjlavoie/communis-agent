@@ -62,14 +62,14 @@ def _build_turn_file(
 
 
 @activity.defn
-async def init_workspace(workflow_id: str, idea: str, num_turns: int, model: str) -> str:
+async def init_workspace(workflow_id: str, idea: str, max_turns: int, model: str) -> str:
     """Create workspace directory and write riff.md manifest. Returns workspace_dir path."""
     ws = _workspace_dir(workflow_id)
     ws.mkdir(parents=True, exist_ok=True)
 
     manifest = {
         "idea": idea,
-        "num_turns": num_turns,
+        "max_turns": max_turns,
         "model": model,
         "workflow_id": workflow_id,
     }
@@ -108,7 +108,8 @@ async def read_turn_context(workspace_dir: str, current_turn: int) -> dict:
             "summary": str,            # contents of summary.md (empty if none)
             "recent_turns": [           # last N turn files, parsed
                 {"turn": int, "role": str, "content": str, "key_insights": [str]}
-            ]
+            ],
+            "plan": str,               # contents of plan.md (empty if none)
         }
     """
     ws = Path(workspace_dir)
@@ -116,6 +117,10 @@ async def read_turn_context(workspace_dir: str, current_turn: int) -> dict:
     # Read rolling summary
     summary_path = ws / "summary.md"
     summary = summary_path.read_text() if summary_path.exists() else ""
+
+    # Read plan file
+    plan_path = ws / "plan.md"
+    plan = plan_path.read_text() if plan_path.exists() else ""
 
     # Find and read recent turn files (the ones before current_turn)
     turn_files: list[tuple[int, Path]] = []
@@ -140,7 +145,7 @@ async def read_turn_context(workspace_dir: str, current_turn: int) -> dict:
             "key_insights": meta.get("key_insights", []),
         })
 
-    return {"summary": summary, "recent_turns": recent_turns}
+    return {"summary": summary, "recent_turns": recent_turns, "plan": plan}
 
 
 @activity.defn
@@ -172,3 +177,18 @@ async def collect_older_turns_text(workspace_dir: str, before_turn: int) -> str:
         if isinstance(tn, int) and tn < before_turn:
             parts.append(f"Turn {tn} ({meta.get('role', 'Unknown')}):\n{parsed['content']}")
     return "\n\n---\n\n".join(parts)
+
+
+@activity.defn
+async def write_plan_file(workspace_dir: str, plan_content: str) -> None:
+    """Write or update plan.md in the workspace."""
+    ws = Path(workspace_dir)
+    (ws / "plan.md").write_text(plan_content)
+
+
+@activity.defn
+async def write_subagent_summary(workspace_dir: str, turn_number: int, summary: str) -> None:
+    """Write sub-agent results summary to workspace."""
+    ws = Path(workspace_dir)
+    filename = f"subagents-step-{turn_number:02d}.md"
+    (ws / filename).write_text(summary)

@@ -10,13 +10,17 @@ from activities.llm_activities import (
     extract_key_insights,
     plan_next_turn,
     summarize_artifacts,
+    summarize_subagent_results,
     validate_user_feedback,
 )
+from activities.tool_activities import execute_run_command
 from activities.workspace_activities import (
     collect_older_turns_text,
     init_workspace,
     read_turn_context,
     read_turn_file,
+    write_plan_file,
+    write_subagent_summary,
     write_turn_artifact,
     write_workspace_summary,
 )
@@ -44,7 +48,10 @@ async def main():
             extract_key_insights,
             plan_next_turn,
             summarize_artifacts,
+            summarize_subagent_results,
             validate_user_feedback,
+            # Tool activities
+            execute_run_command,
             # Workspace activities
             init_workspace,
             write_turn_artifact,
@@ -52,6 +59,8 @@ async def main():
             write_workspace_summary,
             read_turn_file,
             collect_older_turns_text,
+            write_plan_file,
+            write_subagent_summary,
         ],
     )
     print(f"autoRiff worker started on task queue: {TASK_QUEUE}")

@@ -1,30 +1,50 @@
 PLANNER_PROMPT = """\
-You are a meta-agent orchestrating an iterative work loop.
+You are a meta-agent orchestrating an iterative work loop toward completing a goal.
 
-You are planning what the NEXT agent in a chain should do. Each agent in the chain \
-receives a specific role and instructions from you, then produces one turn of work. \
-The task could be anything — writing, research, analysis, design, coding, planning, \
-creative work, problem-solving, or something else entirely. Adapt your approach to \
-whatever the prompt actually asks for.
+Given the goal, the work done so far, any user feedback, and the current step number, \
+decide what to do next. You have three possible actions:
 
-Given the prompt, the work done so far, any user feedback, and where we are in the chain \
-(turn N of M), decide:
+1. **goal_complete** — The goal has been fully accomplished. All requested work is done \
+and the outputs are complete. Set `goal_complete: true`.
 
-1. **role**: A short title for what this next agent should be (e.g., "Devil's Advocate", \
-"Researcher", "Architect", "Editor", "Systems Thinker", "Storyteller"). Be creative. \
-Match the role to what the task actually needs right now.
+2. **step** — Plan a single next step. Choose a role and give specific instructions for \
+what the agent should do. The agent has a `run` tool for executing shell commands.
 
-2. **instructions**: A 2-4 sentence directive telling the agent exactly what to do this turn. \
-Be specific about what to produce. Reference prior work if relevant. \
-If this is the final turn, tell the agent to synthesize everything into a cohesive final output.
+3. **spawn** — Spawn 1-N sub-agents to work on independent tasks in parallel. Each \
+sub-agent gets its own workspace and turn budget. Use this when the goal naturally \
+decomposes into independent sub-tasks that can run concurrently.
 
-3. **reasoning**: One sentence explaining why you chose this role and focus.
+Respond with ONLY valid JSON (no markdown fencing). Choose one of these formats:
 
-Respond with ONLY valid JSON (no markdown fencing):
+Next step:
 {
+    "goal_complete": false,
+    "action": "step",
     "role": "Role Title",
     "instructions": "What this agent should do...",
-    "reasoning": "Why this is the right move now."
+    "reasoning": "Why this is the right move now.",
+    "plan_summary": "Brief summary of overall plan progress."
+}
+
+Spawn sub-agents:
+{
+    "goal_complete": false,
+    "action": "spawn",
+    "subagents": [
+        {"task": "Description of independent task 1", "max_turns": 3},
+        {"task": "Description of independent task 2", "max_turns": 2}
+    ],
+    "reasoning": "Why these tasks are independent and benefit from parallelism.",
+    "plan_summary": "Brief summary of overall plan progress."
+}
+
+Goal complete:
+{
+    "goal_complete": true,
+    "role": "Complete",
+    "instructions": "",
+    "reasoning": "All tasks accomplished.",
+    "plan_summary": "Final summary of what was accomplished."
 }
 """
 
@@ -38,10 +58,40 @@ Build on prior work where it exists rather than starting from scratch. \
 Write in whatever format best serves the content (prose, lists, diagrams, code, etc.).
 """
 
+TURN_AGENT_PROMPT_WITH_TOOLS = """\
+You are: {role}
+
+{instructions}
+
+You have access to a `run` tool that executes shell commands. Use it to:
+- Read, write, and search files
+- Run code, scripts, or tests
+- Inspect the filesystem or system state
+- Download or process data
+- Create files and directories
+
+You can compose commands with pipes and chains:
+  run(command="cat file.txt | grep pattern | wc -l")
+  run(command="ls -la && cat README.md")
+  run(command="python3 script.py || echo 'script failed'")
+
+Commands return output with exit codes and timing. Use stderr info to debug failures.
+
+Focus on producing concrete results. Create files, write code, generate outputs — \
+don't just describe what could be done. When building on prior work, read the existing \
+files first to understand the current state.
+"""
+
 FINAL_TURN_PLANNER_ADDENDUM = """
-IMPORTANT: This is the FINAL turn ({turn}/{total}). The agent you direct must synthesize \
+IMPORTANT: This is the FINAL step ({turn}/{total}). The agent you direct must synthesize \
 ALL prior work into a single cohesive, polished deliverable. The output should stand on its \
 own as the complete result of this session. Choose a role and instructions accordingly.
+"""
+
+APPROACHING_LIMIT_ADDENDUM = """
+NOTE: You are approaching the step limit ({turn}/{total}). You have {remaining} steps left. \
+Consider whether the goal can be completed in the remaining steps. If not, focus on \
+producing the most valuable output possible with the remaining budget.
 """
 
 EXTRACT_INSIGHTS_PROMPT = """\
@@ -64,4 +114,12 @@ or offer useful input.
 
 Respond with ONLY valid JSON (no markdown fencing):
 {"relevant": true/false, "reason": "brief explanation"}
+"""
+
+SUMMARIZE_SUBAGENT_RESULTS_PROMPT = """\
+Summarize the results from parallel sub-agents concisely. For each sub-agent, note what \
+task it was given, what it accomplished, and any key outputs or findings. This summary \
+will be used as context for the parent agent's next planning step.
+
+Output only the summary text.
 """

@@ -11,16 +11,29 @@ with workflow.unsafe.imports_passed_through():
     from activities.llm_activities import (
         plan_next_turn,
         summarize_artifacts,
+        summarize_subagent_results,
         validate_user_feedback,
     )
     from activities.workspace_activities import (
         collect_older_turns_text,
         init_workspace,
         read_turn_context,
+        write_plan_file,
+        write_subagent_summary,
         write_workspace_summary,
     )
-    from models.data_types import RiffConfig, RiffState, TurnConfig, TurnResult
-    from prompts.riff_prompts import FINAL_TURN_PLANNER_ADDENDUM
+    from models.data_types import (
+        DEFAULT_MAX_TURNS,
+        RiffConfig,
+        RiffState,
+        SubAgentResult,
+        TurnConfig,
+        TurnResult,
+    )
+    from prompts.riff_prompts import (
+        APPROACHING_LIMIT_ADDENDUM,
+        FINAL_TURN_PLANNER_ADDENDUM,
+    )
     from workflows.riff_turn import RiffTurnWorkflow
 
 LLM_RETRY_POLICY = RetryPolicy(
@@ -41,7 +54,7 @@ MAX_RECENT_ARTIFACTS = 3
 
 @workflow.defn
 class RiffOrchestratorWorkflow:
-    """Parent workflow: orchestrates iterative riff turns toward idea development."""
+    """Parent workflow: orchestrates iterative turns toward goal completion."""
 
     def __init__(self):
         self.state = RiffState()
@@ -95,39 +108,47 @@ class RiffOrchestratorWorkflow:
     @workflow.run
     async def run(self, config: RiffConfig) -> dict:
         self.state.idea = config.idea
-        self.state.num_turns = config.num_turns
+        effective_max = config.max_turns if config.max_turns > 0 else DEFAULT_MAX_TURNS
+        self.state.max_turns = effective_max
+        self.state.dangerous = config.dangerous
         self.state.status = "running"
 
         try:
-            await self._run_turns(config)
+            await self._run_turns(config, effective_max)
         except (asyncio.CancelledError, Exception) as err:
             if isinstance(err, asyncio.CancelledError) or is_cancelled_exception(err):
                 turns_done = len(self.state.turn_results)
                 self.state.status = "cancelled"
                 self.state.latest_message = (
-                    f"Cancelled after {turns_done}/{config.num_turns} turns."
+                    f"Cancelled after {turns_done} steps."
                 )
                 return self.state.to_dict()
             raise
 
-        self.state.status = "complete"
-        self.state.latest_message = "All turns complete!"
+        if self.state.goal_complete:
+            self.state.status = "complete"
+            self.state.latest_message = "Goal complete!"
+        else:
+            self.state.status = "complete"
+            self.state.latest_message = "All steps complete!"
 
         return self.state.to_dict()
 
-    async def _run_turns(self, config: RiffConfig) -> None:
+    async def _run_turns(self, config: RiffConfig, effective_max: int) -> None:
         """Execute the turn loop. Raises CancelledError if workflow is cancelled."""
         # Initialize workspace
         workspace_dir = await workflow.execute_activity(
             init_workspace,
-            args=[workflow.info().workflow_id, config.idea, config.num_turns, config.model],
+            args=[workflow.info().workflow_id, config.idea, effective_max, config.model],
             start_to_close_timeout=IO_TIMEOUT,
         )
         self.state.workspace_dir = workspace_dir
 
-        for turn_number in range(1, config.num_turns + 1):
+        turn_number = 0
+
+        while turn_number < effective_max:
+            turn_number += 1
             self.state.current_turn = turn_number
-            is_final = turn_number == config.num_turns
 
             # Read workspace context for planner
             ws_context = await workflow.execute_activity(
@@ -136,35 +157,97 @@ class RiffOrchestratorWorkflow:
                 start_to_close_timeout=IO_TIMEOUT,
             )
 
-            # Ask the planner what the next agent should do
-            plan_context = self._build_planner_context(config, ws_context, is_final)
+            # Ask the planner what to do next
+            plan_context = self._build_planner_context(
+                config, ws_context, turn_number, effective_max
+            )
             plan = await workflow.execute_activity(
                 plan_next_turn,
-                args=[plan_context, config.provider, config.base_url],
+                args=[plan_context, config.provider, config.base_url, config.model],
                 start_to_close_timeout=FAST_LLM_TIMEOUT,
                 retry_policy=LLM_RETRY_POLICY,
             )
 
+            # Write plan summary to workspace
+            plan_summary = plan.get("plan_summary", "")
+            if plan_summary:
+                await workflow.execute_activity(
+                    write_plan_file,
+                    args=[workspace_dir, plan_summary],
+                    start_to_close_timeout=IO_TIMEOUT,
+                )
+
+            # Check for goal completion
+            if config.goal_complete_detection and plan.get("goal_complete", False):
+                self.state.goal_complete = True
+                self.state.latest_message = (
+                    f"Goal complete after {len(self.state.turn_results)} steps "
+                    f"— {plan.get('reasoning', '')}"
+                )
+                break
+
+            action = plan.get("action", "step")
+
+            # --- Handle spawn action ---
+            if action == "spawn" and config.max_subagents > 0:
+                subagent_tasks = plan.get("subagents", [])
+                if subagent_tasks:
+                    self.state.current_role = "Spawning sub-agents"
+                    self.state.latest_message = (
+                        f"Step {turn_number}: Spawning {len(subagent_tasks)} sub-agents "
+                        f"— {plan.get('reasoning', '')}"
+                    )
+
+                    subagent_results = await self._spawn_subagents(
+                        subagent_tasks, config, workspace_dir, turn_number
+                    )
+
+                    # Summarize sub-agent results
+                    results_text = "\n\n".join(
+                        f"Task: {r.task}\nStatus: {r.status}\nSummary: {r.summary}"
+                        for r in subagent_results
+                    )
+                    summary = await workflow.execute_activity(
+                        summarize_subagent_results,
+                        args=[results_text, config.idea, config.provider, config.base_url, config.model],
+                        start_to_close_timeout=FAST_LLM_TIMEOUT,
+                        retry_policy=LLM_RETRY_POLICY,
+                    )
+
+                    # Write sub-agent summary to workspace
+                    await workflow.execute_activity(
+                        write_subagent_summary,
+                        args=[workspace_dir, turn_number, summary],
+                        start_to_close_timeout=IO_TIMEOUT,
+                    )
+
+                    self.state.latest_message = (
+                        f"Step {turn_number}: Sub-agents complete."
+                    )
+                    continue
+
+            # --- Handle step action (default) ---
             role = plan["role"]
             instructions = plan["instructions"]
             self.state.current_role = role
             self.state.latest_message = (
-                f"Turn {turn_number}/{config.num_turns}: {role} "
+                f"Step {turn_number}: {role} "
                 f"\u2014 {plan['reasoning']}"
             )
 
-            # Build turn config — lightweight, just workspace path + metadata
+            # Build turn config
             turn_config = TurnConfig(
                 workspace_dir=workspace_dir,
                 idea=config.idea,
                 role=role,
                 instructions=instructions,
                 turn_number=turn_number,
-                total_turns=config.num_turns,
+                max_turns=effective_max,
                 user_feedback=self.user_feedback or "",
                 model=config.model,
                 provider=config.provider,
                 base_url=config.base_url,
+                dangerous=config.dangerous,
             )
 
             # Execute child workflow
@@ -176,12 +259,11 @@ class RiffOrchestratorWorkflow:
 
             self.state.turn_results.append(result)
             self.state.latest_message = (
-                f"Turn {turn_number}/{config.num_turns} ({role}) complete."
+                f"Step {turn_number} ({role}) complete."
             )
 
             # Update rolling summary if enough turns have accumulated
             if len(self.state.turn_results) > MAX_RECENT_ARTIFACTS + 1:
-                # Read older turns from files and summarize
                 threshold_turn = turn_number - MAX_RECENT_ARTIFACTS + 1
                 older_text = await workflow.execute_activity(
                     collect_older_turns_text,
@@ -190,7 +272,7 @@ class RiffOrchestratorWorkflow:
                 )
                 summary = await workflow.execute_activity(
                     summarize_artifacts,
-                    args=[older_text, config.provider, config.base_url],
+                    args=[older_text, config.provider, config.base_url, config.model],
                     start_to_close_timeout=FAST_LLM_TIMEOUT,
                     retry_policy=LLM_RETRY_POLICY,
                 )
@@ -200,8 +282,8 @@ class RiffOrchestratorWorkflow:
                     start_to_close_timeout=IO_TIMEOUT,
                 )
 
-            # Wait for user feedback between turns (unless final or auto mode)
-            if not is_final and not config.auto:
+            # Wait for user feedback between turns (unless auto mode)
+            if not config.auto:
                 self.state.status = "waiting_for_feedback"
                 self.user_feedback = None
                 self.feedback_skipped = False
@@ -222,7 +304,7 @@ class RiffOrchestratorWorkflow:
                 elif self.user_feedback:
                     validation = await workflow.execute_activity(
                         validate_user_feedback,
-                        args=[self.user_feedback, config.idea, config.provider, config.base_url],
+                        args=[self.user_feedback, config.idea, config.provider, config.base_url, config.model],
                         start_to_close_timeout=FAST_LLM_TIMEOUT,
                         retry_policy=LLM_RETRY_POLICY,
                     )
@@ -234,11 +316,80 @@ class RiffOrchestratorWorkflow:
 
                 self.state.status = "running"
 
+    async def _spawn_subagents(
+        self,
+        subagent_tasks: list[dict],
+        config: RiffConfig,
+        workspace_dir: str,
+        turn_number: int,
+    ) -> list[SubAgentResult]:
+        """Spawn sub-agent orchestrator workflows in parallel and collect results."""
+        # Cap at max_subagents
+        tasks = subagent_tasks[: config.max_subagents]
+
+        parent_id = workflow.info().workflow_id
+
+        handles = []
+        for i, task_def in enumerate(tasks):
+            sub_id = f"{parent_id}-subagent-{turn_number}-{i}"
+            sub_config = RiffConfig(
+                idea=task_def.get("task", ""),
+                max_turns=task_def.get("max_turns", 5),
+                model=config.model,
+                auto=True,  # Sub-agents don't prompt for feedback
+                provider=config.provider,
+                base_url=config.base_url,
+                dangerous=config.dangerous,
+                goal_complete_detection=True,
+                max_subagents=0,  # Prevent recursion bomb
+            )
+            handle = await workflow.start_child_workflow(
+                RiffOrchestratorWorkflow.run,
+                sub_config,
+                id=sub_id,
+            )
+            handles.append((task_def, handle))
+
+        # Wait for all sub-agents to complete
+        results: list[SubAgentResult] = []
+        for task_def, handle in handles:
+            try:
+                sub_result = await handle
+                status = "goal_complete" if sub_result.get("goal_complete", False) else sub_result.get("status", "complete")
+                # Build summary from turn results
+                turn_summaries = []
+                for tr in sub_result.get("turn_results", []):
+                    insights = tr.get("key_insights", [])
+                    if insights:
+                        turn_summaries.append(
+                            f"Step {tr['turn_number']} ({tr['role']}): {'; '.join(insights)}"
+                        )
+                summary = "\n".join(turn_summaries) if turn_summaries else sub_result.get("latest_message", "")
+
+                results.append(SubAgentResult(
+                    task=task_def.get("task", ""),
+                    status=status,
+                    summary=summary,
+                    turn_results=sub_result.get("turn_results", []),
+                    workspace_dir=sub_result.get("workspace_dir", ""),
+                ))
+            except Exception as e:
+                results.append(SubAgentResult(
+                    task=task_def.get("task", ""),
+                    status="error",
+                    summary=f"Error: {e}",
+                ))
+
+        return results
+
     def _build_planner_context(
-        self, config: RiffConfig, ws_context: dict, is_final: bool
+        self, config: RiffConfig, ws_context: dict, turn_number: int, effective_max: int
     ) -> str:
         """Build context string for the planner from workspace data."""
-        parts = [f"Prompt: {config.idea}"]
+        parts = [f"Goal: {config.idea}"]
+
+        if ws_context.get("plan"):
+            parts.append(f"Current plan summary:\n{ws_context['plan']}")
 
         if ws_context["summary"]:
             parts.append(f"Summary of earlier work:\n{ws_context['summary']}")
@@ -246,24 +397,51 @@ class RiffOrchestratorWorkflow:
         for turn_data in ws_context["recent_turns"]:
             insights = turn_data.get("key_insights", [])
             parts.append(
-                f"Turn {turn_data['turn']} (role: {turn_data['role']}) insights: "
+                f"Step {turn_data['turn']} (role: {turn_data['role']}) insights: "
                 + "; ".join(insights)
             )
 
         if self.user_feedback:
             parts.append(f"Latest user feedback: {self.user_feedback}")
 
-        parts.append(
-            f"This will be turn {self.state.current_turn} of {config.num_turns}. "
-            f"Turns completed so far: {len(self.state.turn_results)}. "
-            f"Remaining after this one: {config.num_turns - self.state.current_turn}."
-        )
+        # Step position info
+        if config.max_turns > 0:
+            remaining = effective_max - turn_number
+            parts.append(
+                f"This will be step {turn_number} (max {effective_max}). "
+                f"Steps completed so far: {len(self.state.turn_results)}. "
+                f"Remaining after this one: {remaining}."
+            )
+        else:
+            parts.append(
+                f"This will be step {turn_number}. "
+                f"Steps completed so far: {len(self.state.turn_results)}."
+            )
 
-        if is_final:
+        # Sub-agent capability
+        if config.max_subagents > 0:
+            parts.append(
+                f"You can spawn up to {config.max_subagents} sub-agents in parallel "
+                f"for independent tasks using the 'spawn' action."
+            )
+
+        # Approaching limit warning
+        remaining = effective_max - turn_number
+        if remaining <= 2 and remaining > 0:
+            parts.append(
+                APPROACHING_LIMIT_ADDENDUM.format(
+                    turn=turn_number,
+                    total=effective_max,
+                    remaining=remaining,
+                )
+            )
+
+        # Final turn
+        if turn_number == effective_max:
             parts.append(
                 FINAL_TURN_PLANNER_ADDENDUM.format(
-                    turn=self.state.current_turn,
-                    total=config.num_turns,
+                    turn=turn_number,
+                    total=effective_max,
                 )
             )
 

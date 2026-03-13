@@ -14,6 +14,8 @@ from activities.workspace_activities import (
     init_workspace,
     read_turn_context,
     read_turn_file,
+    write_plan_file,
+    write_subagent_summary,
     write_turn_artifact,
     write_workspace_summary,
 )
@@ -101,6 +103,7 @@ async def test_read_turn_context_empty(workspace):
     ctx = await read_turn_context(str(workspace), 1)
     assert ctx["summary"] == ""
     assert ctx["recent_turns"] == []
+    assert ctx["plan"] == ""
 
 
 @pytest.mark.asyncio
@@ -172,3 +175,29 @@ async def test_read_turn_file_missing(workspace):
     workspace.mkdir(parents=True)
     result = await read_turn_file(str(workspace), 99)
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_write_plan_file(workspace):
+    workspace.mkdir(parents=True)
+    await write_plan_file(str(workspace), "Step 1 done. Step 2 next.")
+    plan_path = workspace / "plan.md"
+    assert plan_path.exists()
+    assert plan_path.read_text() == "Step 1 done. Step 2 next."
+
+
+@pytest.mark.asyncio
+async def test_write_subagent_summary(workspace):
+    workspace.mkdir(parents=True)
+    await write_subagent_summary(str(workspace), 3, "Sub-agent results here.")
+    summary_path = workspace / "subagents-step-03.md"
+    assert summary_path.exists()
+    assert summary_path.read_text() == "Sub-agent results here."
+
+
+@pytest.mark.asyncio
+async def test_read_turn_context_with_plan(workspace):
+    workspace.mkdir(parents=True)
+    await write_plan_file(str(workspace), "Current plan: do X then Y.")
+    ctx = await read_turn_context(str(workspace), 1)
+    assert ctx["plan"] == "Current plan: do X then Y."
