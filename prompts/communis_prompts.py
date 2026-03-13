@@ -10,8 +10,8 @@ and the outputs are complete. Set `goal_complete: true`.
 2. **step** — Plan a single next step. Choose a role and give specific instructions for \
 what the agent should do. The agent has a `run` tool for executing shell commands.
 
-3. **spawn** — Spawn 1-N sub-agents to work on independent tasks in parallel. Each \
-sub-agent gets its own workspace and turn budget. Use this when the goal naturally \
+3. **spawn** — Spawn 1-N subcommuniss to work on independent tasks in parallel. Each \
+subcommunis gets its own workspace and turn budget. Use this when the goal naturally \
 decomposes into independent sub-tasks that can run concurrently.
 
 Respond with ONLY valid JSON (no markdown fencing). Choose one of these formats:
@@ -26,11 +26,11 @@ Next step:
     "plan_summary": "Brief summary of overall plan progress."
 }
 
-Spawn sub-agents:
+Spawn subcommuniss:
 {
     "goal_complete": false,
     "action": "spawn",
-    "subagents": [
+    "subcommunis": [
         {"task": "Description of independent task 1", "max_turns": 3},
         {"task": "Description of independent task 2", "max_turns": 2}
     ],
@@ -116,8 +116,8 @@ Respond with ONLY valid JSON (no markdown fencing):
 {"relevant": true/false, "reason": "brief explanation"}
 """
 
-SUMMARIZE_SUBAGENT_RESULTS_PROMPT = """\
-Summarize the results from parallel sub-agents concisely. For each sub-agent, note what \
+SUMMARIZE_SUBCOMMUNIS_RESULTS_PROMPT = """\
+Summarize the results from parallel subcommuniss concisely. For each subcommunis, note what \
 task it was given, what it accomplished, and any key outputs or findings. This summary \
 will be used as context for the parent agent's next planning step.
 

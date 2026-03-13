@@ -1,6 +1,6 @@
-"""Example: REST API wrapper around autoRiff.
+"""Example: REST API wrapper around communis.
 
-Exposes autoRiff as an HTTP API so any client (frontend, mobile, webhook,
+Exposes communis as an HTTP API so any client (frontend, mobile, webhook,
 curl) can start sessions, check status, send feedback, and read results.
 
 Usage:
@@ -11,15 +11,15 @@ Usage:
     uvicorn examples.api_server:app --reload --port 8000
 
     # Start a session:
-    curl -X POST http://localhost:8000/riff \
+    curl -X POST http://localhost:8000/communis \
       -H "Content-Type: application/json" \
       -d '{"idea": "design an onboarding flow", "num_turns": 3}'
 
     # Check status:
-    curl http://localhost:8000/riff/<workflow_id>
+    curl http://localhost:8000/communis/<workflow_id>
 
     # Send feedback:
-    curl -X POST http://localhost:8000/riff/<workflow_id>/feedback \
+    curl -X POST http://localhost:8000/communis/<workflow_id>/feedback \
       -H "Content-Type: application/json" \
       -d '{"feedback": "focus on time-to-first-value"}'
 """
@@ -32,13 +32,13 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from temporalio.client import Client
 
-from models.data_types import RiffConfig
-from workflows.riff_orchestrator import RiffOrchestratorWorkflow
+from models.data_types import CommunisConfig
+from workflows.communis_orchestrator import CommunisOrchestratorWorkflow
 
-app = FastAPI(title="autoRiff API", description="Self-directing iterative work loop as a service")
+app = FastAPI(title="communis API", description="Self-directing iterative work loop as a service")
 temporal: Client | None = None
 
-TASK_QUEUE = "autoriff-task-queue"
+TASK_QUEUE = "communis-task-queue"
 
 
 class StartRequest(BaseModel):
@@ -60,13 +60,13 @@ async def startup():
     temporal = await Client.connect("localhost:7233")
 
 
-@app.post("/riff")
-async def start_riff(req: StartRequest):
-    """Start a new autoRiff session. Returns a workflow_id to track it."""
-    workflow_id = f"riff-{uuid.uuid4().hex[:8]}"
+@app.post("/communis")
+async def start_communis(req: StartRequest):
+    """Start a new communis session. Returns a workflow_id to track it."""
+    workflow_id = f"communis-{uuid.uuid4().hex[:8]}"
     handle = await temporal.start_workflow(
-        RiffOrchestratorWorkflow.run,
-        RiffConfig(
+        CommunisOrchestratorWorkflow.run,
+        CommunisConfig(
             idea=req.idea,
             num_turns=req.num_turns,
             model=req.model or "claude-sonnet-4-5-20250929",
@@ -80,39 +80,39 @@ async def start_riff(req: StartRequest):
     return {"workflow_id": handle.id}
 
 
-@app.get("/riff/{workflow_id}")
+@app.get("/communis/{workflow_id}")
 async def get_status(workflow_id: str):
-    """Get current state of a running riff session."""
+    """Get current state of a running communis session."""
     try:
         handle = temporal.get_workflow_handle(workflow_id)
-        return await handle.query(RiffOrchestratorWorkflow.get_state)
+        return await handle.query(CommunisOrchestratorWorkflow.get_state)
     except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))
 
 
-@app.get("/riff/{workflow_id}/result")
+@app.get("/communis/{workflow_id}/result")
 async def get_result(workflow_id: str):
     """Get final result. Blocks until the session completes."""
     handle = temporal.get_workflow_handle(workflow_id)
     return await handle.result()
 
 
-@app.get("/riff/{workflow_id}/turns")
+@app.get("/communis/{workflow_id}/turns")
 async def get_turns(workflow_id: str):
     """Get all completed turn results."""
     try:
         handle = temporal.get_workflow_handle(workflow_id)
-        return await handle.query(RiffOrchestratorWorkflow.get_all_results)
+        return await handle.query(CommunisOrchestratorWorkflow.get_all_results)
     except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))
 
 
-@app.get("/riff/{workflow_id}/turns/{turn_number}")
+@app.get("/communis/{workflow_id}/turns/{turn_number}")
 async def get_turn(workflow_id: str, turn_number: int):
     """Get a specific turn result."""
     try:
         handle = temporal.get_workflow_handle(workflow_id)
-        result = await handle.query(RiffOrchestratorWorkflow.get_turn_result, turn_number)
+        result = await handle.query(CommunisOrchestratorWorkflow.get_turn_result, turn_number)
         if result is None:
             raise HTTPException(status_code=404, detail=f"Turn {turn_number} not found")
         return result
@@ -122,24 +122,24 @@ async def get_turn(workflow_id: str, turn_number: int):
         raise HTTPException(status_code=404, detail=str(e))
 
 
-@app.post("/riff/{workflow_id}/feedback")
+@app.post("/communis/{workflow_id}/feedback")
 async def send_feedback(workflow_id: str, req: FeedbackRequest):
     """Send feedback to a paused session (when auto=False)."""
     handle = temporal.get_workflow_handle(workflow_id)
-    await handle.signal(RiffOrchestratorWorkflow.receive_user_feedback, req.feedback)
+    await handle.signal(CommunisOrchestratorWorkflow.receive_user_feedback, req.feedback)
     return {"status": "sent"}
 
 
-@app.post("/riff/{workflow_id}/skip")
+@app.post("/communis/{workflow_id}/skip")
 async def skip_feedback(workflow_id: str):
     """Skip the feedback pause and continue."""
     handle = temporal.get_workflow_handle(workflow_id)
-    await handle.signal(RiffOrchestratorWorkflow.skip_feedback)
+    await handle.signal(CommunisOrchestratorWorkflow.skip_feedback)
     return {"status": "skipped"}
 
 
-@app.post("/riff/{workflow_id}/cancel")
-async def cancel_riff(workflow_id: str):
+@app.post("/communis/{workflow_id}/cancel")
+async def cancel_communis(workflow_id: str):
     """Cancel a running session. Preserves completed turns."""
     handle = temporal.get_workflow_handle(workflow_id)
     await handle.cancel()

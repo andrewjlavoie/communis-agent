@@ -1,20 +1,20 @@
-# autoRiff Architecture Diagrams
+# communis Architecture Diagrams
 
-**Goal-driven agent with durable execution, tool use, sub-agent spawning, and human-in-the-loop approval.**
+**Goal-driven agent with durable execution, tool use, subcommunis spawning, and human-in-the-loop approval.**
 
 ---
 
 ## 1. Full Orchestration Flow
 
-The orchestrator runs a `while` loop. Each iteration, the planner chooses one of three actions: execute a step, spawn parallel sub-agents, or signal goal completion.
+The orchestrator runs a `while` loop. Each iteration, the planner chooses one of three actions: execute a step, spawn parallel subcommuniss, or signal goal completion.
 
 ```mermaid
 flowchart TD
     subgraph INIT["INITIALIZATION"]
         CLI["CLI parses flags<br/>--provider --model --turns --dangerous --auto"]
-        RC["RiffConfig:<br/>idea, max_turns, model, provider,<br/>goal_complete_detection, max_subagents, dangerous"]
-        IW["init_workspace activity<br/>Creates .autoriff/workflow-id/"]
-        RIFF["Writes riff.md<br/>(YAML manifest)"]
+        RC["CommunisConfig:<br/>idea, max_turns, model, provider,<br/>goal_complete_detection, max_subcommunis, dangerous"]
+        IW["init_workspace activity<br/>Creates .communis/workflow-id/"]
+        RIFF["Writes communis.md<br/>(YAML manifest)"]
         CLI --> RC --> IW --> RIFF
     end
 
@@ -23,7 +23,7 @@ flowchart TD
     subgraph LOOP["WHILE LOOP (turn < effective_max)"]
         direction TB
         RCTX["read_turn_context activity<br/>Reads plan.md + summary.md + last 3 turn files"]
-        BPC["_build_planner_context()<br/>idea + plan + summary + insights + step position<br/>+ sub-agent capability + approaching-limit warning"]
+        BPC["_build_planner_context()<br/>idea + plan + summary + insights + step position<br/>+ subcommunis capability + approaching-limit warning"]
         PLAN["plan_next_turn activity<br/>PLANNER_PROMPT --> LLM --> JSON"]
 
         RCTX --> BPC --> PLAN
@@ -37,16 +37,16 @@ flowchart TD
 
         subgraph STEP["ACTION: STEP"]
             WPF["write_plan_file activity<br/>Updates plan.md"]
-            CHILD["Execute RiffTurnWorkflow<br/>(child workflow)"]
+            CHILD["Execute CommunisTurnWorkflow<br/>(child workflow)"]
             WPF --> CHILD
         end
 
         subgraph SPAWN["ACTION: SPAWN"]
             WPF2["write_plan_file activity"]
-            SUBS["_spawn_subagents()<br/>Start N child RiffOrchestratorWorkflows<br/>in parallel (max_subagents cap)"]
-            WAIT["await all sub-agents"]
-            SUMSA["summarize_subagent_results activity<br/>LLM condenses all sub-agent output"]
-            WSS["write_subagent_summary activity<br/>Writes subagents-step-NN.md"]
+            SUBS["_spawn_subcommunis()<br/>Start N child CommunisOrchestratorWorkflows<br/>in parallel (max_subcommunis cap)"]
+            WAIT["await all subcommuniss"]
+            SUMSA["summarize_subcommunis_results activity<br/>LLM condenses all subcommunis output"]
+            WSS["write_subcommunis_summary activity<br/>Writes subcommunis-step-NN.md"]
             WPF2 --> SUBS --> WAIT --> SUMSA --> WSS
         end
 
@@ -77,11 +77,11 @@ flowchart TD
 
 ## 2. Child Turn Workflow — Agent Loop with Tool Use
 
-Each step runs as a child `RiffTurnWorkflow`. The agent calls the LLM, which can invoke the `run` tool to execute shell commands. The loop repeats until the LLM stops requesting tools (max 20 iterations).
+Each step runs as a child `CommunisTurnWorkflow`. The agent calls the LLM, which can invoke the `run` tool to execute shell commands. The loop repeats until the LLM stops requesting tools (max 20 iterations).
 
 ```mermaid
 flowchart TD
-    subgraph TURN["RiffTurnWorkflow"]
+    subgraph TURN["CommunisTurnWorkflow"]
         direction TB
         RCTX["read_turn_context activity<br/>Reads summary.md + last 3 turn files (full content)"]
         BUM["_build_user_message()<br/>Goal + Position + Summary + Recent Work + Feedback"]
@@ -139,16 +139,16 @@ flowchart TD
 
 ## 3. Sub-Agent Spawning
 
-When the planner returns `action: "spawn"`, the orchestrator starts parallel child orchestrator workflows. Sub-agents have `max_subagents=0` to prevent recursion.
+When the planner returns `action: "spawn"`, the orchestrator starts parallel child orchestrator workflows. Subcommuniss have `max_subcommunis=0` to prevent recursion.
 
 ```mermaid
 flowchart TD
-    PARENT["Parent RiffOrchestratorWorkflow<br/>autoriff-abc123"]
+    PARENT["Parent CommunisOrchestratorWorkflow<br/>communis-abc123"]
 
-    PARENT -->|"Planner: action=spawn"| SPAWN_FN["_spawn_subagents()"]
+    PARENT -->|"Planner: action=spawn"| SPAWN_FN["_spawn_subcommunis()"]
 
-    SPAWN_FN -->|"child orchestrator"| SA1["RiffOrchestratorWorkflow<br/>autoriff-abc123-subagent-3-0<br/>task: 'Research API docs'<br/>max_subagents=0, auto=True"]
-    SPAWN_FN -->|"child orchestrator"| SA2["RiffOrchestratorWorkflow<br/>autoriff-abc123-subagent-3-1<br/>task: 'Analyze user model'<br/>max_subagents=0, auto=True"]
+    SPAWN_FN -->|"child orchestrator"| SA1["CommunisOrchestratorWorkflow<br/>communis-abc123-subcommunis-3-0<br/>task: 'Research API docs'<br/>max_subcommunis=0, auto=True"]
+    SPAWN_FN -->|"child orchestrator"| SA2["CommunisOrchestratorWorkflow<br/>communis-abc123-subcommunis-3-1<br/>task: 'Analyze user model'<br/>max_subcommunis=0, auto=True"]
 
     SA1 -->|"own turn loop"| SA1T1["Turn 1"]
     SA1T1 --> SA1T2["Turn 2<br/>goal_complete"]
@@ -157,8 +157,8 @@ flowchart TD
     SA1T2 --> COLLECT["Collect SubAgentResults"]
     SA2T1 --> COLLECT
 
-    COLLECT --> SUMMARIZE["summarize_subagent_results activity<br/>LLM condenses findings"]
-    SUMMARIZE --> WRITE["write_subagent_summary<br/>subagents-step-03.md"]
+    COLLECT --> SUMMARIZE["summarize_subcommunis_results activity<br/>LLM condenses findings"]
+    SUMMARIZE --> WRITE["write_subcommunis_summary<br/>subcommunis-step-03.md"]
     WRITE --> CONTINUE["Parent continues<br/>next planner iteration"]
 
     subgraph SUB_CONFIG["Sub-Agent Config (inherited from parent)"]
@@ -167,7 +167,7 @@ flowchart TD
         SC2["provider: parent.provider"]
         SC3["dangerous: parent.dangerous"]
         SC4["auto: True (always)"]
-        SC5["max_subagents: 0 (no recursion)"]
+        SC5["max_subcommunis: 0 (no recursion)"]
         SC6["goal_complete_detection: True"]
     end
 
@@ -182,18 +182,18 @@ flowchart TD
 ## 4. Workspace File Structure
 
 ```
-.autoriff/<workflow-id>/
-  riff.md                       # Session manifest (YAML: idea, max_turns, model)
+.communis/<workflow-id>/
+  communis.md                       # Session manifest (YAML: idea, max_turns, model)
   plan.md                       # Rolling plan summary (updated each step by planner)
   turn-01-researcher.md         # Turn artifact (YAML frontmatter + full content)
   turn-02-implementer.md
-  subagents-step-03.md          # LLM summary of sub-agent results from step 3
-  subagents/                    # Sub-agent workspaces
-    <id>-subagent-3-0/          # Each sub-agent gets its own full workspace
-      riff.md
+  subcommunis-step-03.md          # LLM summary of subcommunis results from step 3
+  subcommunis/                    # Subcommunis workspaces
+    <id>-subcommunis-3-0/          # Each subcommunis gets its own full workspace
+      communis.md
       plan.md
       turn-01-worker.md
-    <id>-subagent-3-1/
+    <id>-subcommunis-3-1/
       ...
   turn-04-synthesizer.md
   summary.md                    # Rolling summary (replaces old turns once > MAX_RECENT+1)
@@ -237,7 +237,7 @@ flowchart TD
         direction TB
 
         subgraph P1["PLANNER_PROMPT (orchestrator, per-step)"]
-            P1D["Input: goal + plan.md + summary + insights + step position + sub-agent budget<br/>Output: JSON with action (step / spawn / goal_complete)<br/>Decides WHAT to do next"]
+            P1D["Input: goal + plan.md + summary + insights + step position + subcommunis budget<br/>Output: JSON with action (step / spawn / goal_complete)<br/>Decides WHAT to do next"]
         end
 
         subgraph P2["TURN_AGENT_PROMPT_WITH_TOOLS (child workflow, per-step)"]
@@ -257,7 +257,7 @@ flowchart TD
         end
 
         subgraph P6["SUMMARIZE_SUBAGENT_RESULTS_PROMPT (orchestrator, after spawn)"]
-            P6D["Input: all sub-agent task/status/summary pairs<br/>Output: condensed summary for parent context<br/>Bridges sub-agent work back to parent"]
+            P6D["Input: all subcommunis task/status/summary pairs<br/>Output: condensed summary for parent context<br/>Bridges subcommunis work back to parent"]
         end
 
         subgraph P7["APPROACHING_LIMIT / FINAL_TURN ADDENDA (orchestrator)"]
@@ -270,7 +270,7 @@ flowchart TD
         A["Planner<br/>decides action"] -->|"step: role + instructions"| B["Turn Agent<br/>executes with tools"]
         A -->|"spawn: tasks"| E["Sub-Agents<br/>(own turn loops)"]
         E -->|"results"| F["Sub-Agent Summarizer"]
-        F -->|"subagents-step-N.md"| A
+        F -->|"subcommunis-step-N.md"| A
         B -->|"content"| C["Insight Extractor"]
         C -->|"insights in turn file"| A
         B -->|"content accumulates"| D["Artifact Summarizer"]
@@ -295,16 +295,16 @@ flowchart TD
 ```mermaid
 flowchart TD
     subgraph TEMPORAL["Temporal Durable Execution"]
-        O["RiffOrchestratorWorkflow<br/>(parent -- runs the while loop)"]
+        O["CommunisOrchestratorWorkflow<br/>(parent -- runs the while loop)"]
 
-        O -->|"child workflow"| T1["RiffTurnWorkflow<br/>-turn-1"]
+        O -->|"child workflow"| T1["CommunisTurnWorkflow<br/>-turn-1"]
         O -->|"child workflow"| T2["-turn-2"]
 
-        O -->|"child orchestrator"| SA1["RiffOrchestratorWorkflow<br/>-subagent-3-0"]
-        O -->|"child orchestrator"| SA2["-subagent-3-1"]
+        O -->|"child orchestrator"| SA1["CommunisOrchestratorWorkflow<br/>-subcommunis-3-0"]
+        O -->|"child orchestrator"| SA2["-subcommunis-3-1"]
 
-        SA1 -->|"child workflow"| SA1T1["RiffTurnWorkflow<br/>-subagent-3-0-turn-1"]
-        SA2 -->|"child workflow"| SA2T1["-subagent-3-1-turn-1"]
+        SA1 -->|"child workflow"| SA1T1["CommunisTurnWorkflow<br/>-subcommunis-3-0-turn-1"]
+        SA2 -->|"child workflow"| SA2T1["-subcommunis-3-1-turn-1"]
 
         O -->|"child workflow"| T4["-turn-4"]
 
@@ -316,7 +316,7 @@ flowchart TD
                 A5["extract_key_insights"]
                 A8["summarize_artifacts"]
                 A10["validate_user_feedback"]
-                A11["summarize_subagent_results"]
+                A11["summarize_subcommunis_results"]
             end
             subgraph TOOL_ACT["Tool Activities"]
                 A12["execute_run_command"]
@@ -328,12 +328,12 @@ flowchart TD
                 A7["collect_older_turns_text"]
                 A9["write_workspace_summary"]
                 A13["write_plan_file"]
-                A14["write_subagent_summary"]
+                A14["write_subcommunis_summary"]
             end
         end
     end
 
-    FS[(".autoriff/workflow-id/<br/>File System Workspace")]
+    FS[(".communis/workflow-id/<br/>File System Workspace")]
 
     IO_ACT -->|"read/write"| FS
 
@@ -357,14 +357,14 @@ flowchart TD
 | `--no-goal-detect` | Fixed N steps, no early exit (requires `--turns > 0`) |
 | `--dangerous` | Auto-approve all tool calls |
 | `--auto` | Skip user feedback prompts |
-| `--max-subagents N` | 0-5, default 3 (0 disables spawning) |
+| `--max-subcommunis N` | 0-5, default 3 (0 disables spawning) |
 | `--provider openai` | Use OpenAI-compatible API (LM Studio, vLLM, etc.) |
 | `--base-url URL` | Override OpenAI base URL |
 | `--model MODEL` | Model for all LLM calls (planner, agent, insights, summaries) |
 
 ## 9. LLM Provider Support
 
-Both Anthropic and OpenAI-compatible providers are supported. The `_call_openai` path converts Anthropic-format messages (tool_use/tool_result content blocks) to OpenAI format (tool_calls on assistant messages, role=tool for results) transparently. All activities accept `provider`, `base_url`, and `model` parameters passed from the CLI through `RiffConfig`.
+Both Anthropic and OpenAI-compatible providers are supported. The `_call_openai` path converts Anthropic-format messages (tool_use/tool_result content blocks) to OpenAI format (tool_calls on assistant messages, role=tool for results) transparently. All activities accept `provider`, `base_url`, and `model` parameters passed from the CLI through `CommunisConfig`.
 
 | Provider | Use Case | Message Format |
 |----------|----------|----------------|

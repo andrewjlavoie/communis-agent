@@ -6,7 +6,7 @@ DEFAULT_MAX_TURNS = 50
 
 
 @dataclass
-class RiffConfig:
+class CommunisConfig:
     """Input to the orchestrator workflow."""
 
     idea: str
@@ -17,12 +17,12 @@ class RiffConfig:
     base_url: str = ""  # OpenAI-compatible base URL — empty = use env default
     dangerous: bool = False  # Auto-approve all tool calls (no human-in-the-loop)
     goal_complete_detection: bool = True  # Detect goal completion and stop early
-    max_subagents: int = 3  # Max parallel sub-agents the planner can spawn (0 = disabled)
+    max_subcommunis: int = 3  # Max parallel subcommuniss the planner can spawn (0 = disabled)
 
 
 @dataclass
 class TurnConfig:
-    """Input to a single riff turn child workflow."""
+    """Input to a single communis turn child workflow."""
 
     workspace_dir: str  # Path to workspace directory with turn files
     idea: str
@@ -40,7 +40,7 @@ class TurnConfig:
 
 @dataclass
 class TurnResult:
-    """Output from a single riff turn child workflow. Metadata only — full content lives in workspace files."""
+    """Output from a single communis turn child workflow. Metadata only — full content lives in workspace files."""
 
     turn_number: int
     role: str
@@ -61,16 +61,16 @@ class NextTurnPlan:
 
 
 @dataclass
-class SubAgentTask:
-    """A task to be executed by a sub-agent."""
+class SubCommunisTask:
+    """A task to be executed by a subcommunis."""
 
-    task: str  # What the sub-agent should accomplish
-    max_turns: int = 5  # Turn budget for this sub-agent
+    task: str  # What the subcommunis should accomplish
+    max_turns: int = 5  # Turn budget for this subcommunis
 
 
 @dataclass
-class SubAgentResult:
-    """Result from a completed sub-agent."""
+class SubCommunisResult:
+    """Result from a completed subcommunis."""
 
     task: str
     status: str  # "complete" | "goal_complete" | "cancelled" | "error"
@@ -80,7 +80,7 @@ class SubAgentResult:
 
 
 @dataclass
-class RiffState:
+class CommunisState:
     """Queryable state for the orchestrator workflow."""
 
     idea: str = ""

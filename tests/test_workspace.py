@@ -15,7 +15,7 @@ from activities.workspace_activities import (
     read_turn_context,
     read_turn_file,
     write_plan_file,
-    write_subagent_summary,
+    write_subcommunis_summary,
     write_turn_artifact,
     write_workspace_summary,
 )
@@ -67,7 +67,7 @@ async def test_init_workspace(workspace):
     try:
         ws = await init_workspace("test-workspace", "A cool idea", 3, "claude-sonnet-4-5-20250929")
         assert Path(ws).exists()
-        riff_md = (Path(ws) / "riff.md").read_text()
+        riff_md = (Path(ws) / "communis.md").read_text()
         assert "A cool idea" in riff_md
     finally:
         mod.WORKSPACE_BASE = orig
@@ -187,12 +187,12 @@ async def test_write_plan_file(workspace):
 
 
 @pytest.mark.asyncio
-async def test_write_subagent_summary(workspace):
+async def test_write_subcommunis_summary(workspace):
     workspace.mkdir(parents=True)
-    await write_subagent_summary(str(workspace), 3, "Sub-agent results here.")
-    summary_path = workspace / "subagents-step-03.md"
+    await write_subcommunis_summary(str(workspace), 3, "Subcommunis results here.")
+    summary_path = workspace / "subcommunis-step-03.md"
     assert summary_path.exists()
-    assert summary_path.read_text() == "Sub-agent results here."
+    assert summary_path.read_text() == "Subcommunis results here."
 
 
 @pytest.mark.asyncio

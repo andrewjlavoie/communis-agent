@@ -11,7 +11,7 @@ from activities.llm_activities import (
     extract_key_insights,
     plan_next_turn,
     summarize_artifacts,
-    summarize_subagent_results,
+    summarize_subcommunis_results,
     validate_user_feedback,
 )
 
@@ -57,7 +57,7 @@ async def test_plan_next_turn():
     assert result["reasoning"] == "Need critical analysis."
     assert result["goal_complete"] is False
     assert result["action"] == "step"
-    assert result["subagents"] == []
+    assert result["subcommunis"] == []
 
 
 @pytest.mark.asyncio
@@ -114,12 +114,12 @@ async def test_validate_user_feedback_irrelevant():
 
 
 @pytest.mark.asyncio
-async def test_summarize_subagent_results():
-    mock_response = _make_llm_response("Sub-agent A found X. Sub-agent B found Y.")
+async def test_summarize_subcommunis_results():
+    mock_response = _make_llm_response("Subcommunis A found X. Subcommunis B found Y.")
 
     with patch("activities.llm_activities._call_llm", new_callable=AsyncMock, return_value=mock_response):
-        result = await summarize_subagent_results(
+        result = await summarize_subcommunis_results(
             "Task: Research A\nSummary: Found X", "Build a product"
         )
 
-    assert "Sub-agent" in result
+    assert "Subcommunis" in result

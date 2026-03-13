@@ -1,4 +1,4 @@
-"""Example: Multi-phase research pipeline using autoRiff as a child workflow.
+"""Example: Multi-phase research pipeline using communis as a child workflow.
 
 Runs three sequential riff sessions — explore, deep dive, synthesize —
 where each phase feeds its insights into the next.
@@ -12,7 +12,7 @@ Usage:
 
     # Or register the workflow with the existing worker and start via Temporal CLI:
     #   temporal workflow start --type ResearchPipelineWorkflow \
-    #     --task-queue autoriff-task-queue --workflow-id "research-test" \
+    #     --task-queue communis-task-queue --workflow-id "research-test" \
     #     --input '"your topic here"'
 """
 
@@ -25,13 +25,13 @@ from temporalio import workflow
 from temporalio.client import Client
 
 with workflow.unsafe.imports_passed_through():
-    from models.data_types import RiffConfig
-    from workflows.riff_orchestrator import RiffOrchestratorWorkflow
+    from models.data_types import CommunisConfig
+    from workflows.communis_orchestrator import CommunisOrchestratorWorkflow
 
 
 @workflow.defn
 class ResearchPipelineWorkflow:
-    """Run three autoRiff phases: explore → deep dive → synthesize."""
+    """Run three communis phases: explore → deep dive → synthesize."""
 
     @workflow.run
     async def run(self, topic: str) -> dict:
@@ -39,8 +39,8 @@ class ResearchPipelineWorkflow:
 
         # Phase 1: Broad exploration
         explore = await workflow.execute_child_workflow(
-            RiffOrchestratorWorkflow.run,
-            RiffConfig(
+            CommunisOrchestratorWorkflow.run,
+            CommunisConfig(
                 idea=f"Research and explore: {topic}",
                 num_turns=3,
                 auto=True,
@@ -56,8 +56,8 @@ class ResearchPipelineWorkflow:
 
         # Phase 2: Deep dive on findings
         deep_dive = await workflow.execute_child_workflow(
-            RiffOrchestratorWorkflow.run,
-            RiffConfig(
+            CommunisOrchestratorWorkflow.run,
+            CommunisConfig(
                 idea=(
                     f"Deep dive on: {topic}\n\n"
                     f"Prior research found:\n"
@@ -78,8 +78,8 @@ class ResearchPipelineWorkflow:
 
         # Phase 3: Final synthesis
         report = await workflow.execute_child_workflow(
-            RiffOrchestratorWorkflow.run,
-            RiffConfig(
+            CommunisOrchestratorWorkflow.run,
+            CommunisConfig(
                 idea=(
                     f"Create a comprehensive report on: {topic}\n\n"
                     f"Exploration insights:\n"
@@ -134,14 +134,14 @@ async def main():
         write_turn_artifact,
         write_workspace_summary,
     )
-    from workflows.riff_turn import RiffTurnWorkflow
+    from workflows.communis_turn import CommunisTurnWorkflow
 
-    task_queue = "autoriff-task-queue"
+    task_queue = "communis-task-queue"
 
     async with Worker(
         client,
         task_queue=task_queue,
-        workflows=[ResearchPipelineWorkflow, RiffOrchestratorWorkflow, RiffTurnWorkflow],
+        workflows=[ResearchPipelineWorkflow, CommunisOrchestratorWorkflow, CommunisTurnWorkflow],
         activities=[
             call_claude, plan_next_turn, extract_key_insights,
             summarize_artifacts, validate_user_feedback,

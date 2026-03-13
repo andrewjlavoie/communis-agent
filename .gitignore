@@ -1,7 +1,7 @@
 __pycache__/
 *.pyc
 .env
-.autoriff/
+.communis/
 .pytest_cache/
 *.egg-info/
 dist/

@@ -17,11 +17,11 @@ from rich.panel import Panel
 from rich.table import Table
 from temporalio.client import Client, WorkflowHandle
 
-from models.data_types import DEFAULT_MAX_TURNS, RiffConfig
-from workflows.riff_orchestrator import RiffOrchestratorWorkflow
-from workflows.riff_turn import RiffTurnWorkflow
+from models.data_types import DEFAULT_MAX_TURNS, CommunisConfig
+from workflows.communis_orchestrator import CommunisOrchestratorWorkflow
+from workflows.communis_turn import CommunisTurnWorkflow
 
-TASK_QUEUE = "autoriff-task-queue"
+TASK_QUEUE = "communis-task-queue"
 POLL_INTERVAL = 1.5
 
 console = Console()
@@ -109,7 +109,7 @@ class MarkdownLog:
 
     def __init__(self, idea: str, max_turns: int, model: str, provider: str, goal_detect: bool):
         self.parts: list[str] = []
-        self.parts.append(f"# autoRiff Session\n")
+        self.parts.append(f"# communis Session\n")
         self.parts.append(f"**Prompt:** {idea}\n")
         mode = "goal-detect" if goal_detect else f"fixed {max_turns} steps"
         if max_turns == 0:
@@ -175,7 +175,7 @@ class MarkdownLog:
 async def run_cli(
     idea: str, max_turns: int, model: str, auto: bool = False, verbose: bool = False,
     provider: str = "", base_url: str = "", output: str = "", dangerous: bool = False,
-    goal_complete_detection: bool = True, max_subagents: int = 3,
+    goal_complete_detection: bool = True, max_subcommunis: int = 3,
 ):
     load_dotenv()
 
@@ -185,7 +185,7 @@ async def run_cli(
     effective_max = max_turns if max_turns > 0 else DEFAULT_MAX_TURNS
     md_log = MarkdownLog(idea, max_turns, model, provider, goal_complete_detection) if output else None
 
-    console.print(Panel("[bold]autoRiff[/bold] — Self-Directing Work Loop", style="blue"))
+    console.print(Panel("[bold]communis[/bold] — Self-Directing Work Loop", style="blue"))
     console.print(f"Prompt: [bold]{idea}[/bold]")
     mode_parts = []
     if auto:
@@ -206,8 +206,8 @@ async def run_cli(
         turns_display = f"fixed {max_turns}"
 
     console.print(f"Steps: {turns_display} | Model: {model} | Provider: {provider_label} | Mode: {mode}")
-    if max_subagents > 0:
-        console.print(f"[dim]Sub-agents: up to {max_subagents} parallel[/dim]")
+    if max_subcommunis > 0:
+        console.print(f"[dim]Subcommunis: up to {max_subcommunis} parallel[/dim]")
 
     if verbose:
         console.print(f"[dim]Temporal: {address} (namespace: {namespace})[/dim]")
@@ -233,16 +233,16 @@ async def run_cli(
         console.print(f"[dim]Connected to Temporal ({_elapsed(session_start)})[/dim]")
 
     # Start the orchestrator workflow
-    workflow_id = f"autoriff-{uuid.uuid4().hex[:8]}"
-    config = RiffConfig(
+    workflow_id = f"communis-{uuid.uuid4().hex[:8]}"
+    config = CommunisConfig(
         idea=idea, max_turns=max_turns, model=model, auto=auto,
         provider=provider, base_url=base_url, dangerous=dangerous,
         goal_complete_detection=goal_complete_detection,
-        max_subagents=max_subagents,
+        max_subcommunis=max_subcommunis,
     )
 
     handle = await client.start_workflow(
-        RiffOrchestratorWorkflow.run,
+        CommunisOrchestratorWorkflow.run,
         config,
         id=workflow_id,
         task_queue=TASK_QUEUE,
@@ -269,7 +269,7 @@ async def run_cli(
         poll_count += 1
 
         try:
-            state = await handle.query(RiffOrchestratorWorkflow.get_state)
+            state = await handle.query(CommunisOrchestratorWorkflow.get_state)
         except Exception:
             if verbose:
                 console.print(f"[dim]Query failed — workflow may have completed ({_elapsed(session_start)})[/dim]")
@@ -294,10 +294,10 @@ async def run_cli(
             child_id = f"{workflow_id}-turn-{state['current_turn']}"
             try:
                 child_handle = client.get_workflow_handle(child_id)
-                pending = await child_handle.query(RiffTurnWorkflow.get_pending_tool)
+                pending = await child_handle.query(CommunisTurnWorkflow.get_pending_tool)
                 if pending:
                     approved = _prompt_for_tool_approval(pending["command"])
-                    await child_handle.signal(RiffTurnWorkflow.approve_tool, approved)
+                    await child_handle.signal(CommunisTurnWorkflow.approve_tool, approved)
             except Exception:
                 pass  # Child not started yet or already completed
 
@@ -334,10 +334,10 @@ async def run_cli(
                 console.print()
                 feedback = _prompt_for_feedback()
                 if feedback is None:
-                    await handle.signal(RiffOrchestratorWorkflow.skip_feedback)
+                    await handle.signal(CommunisOrchestratorWorkflow.skip_feedback)
                     console.print("[dim]Skipping feedback, continuing...[/dim]\n")
                 else:
-                    await handle.signal(RiffOrchestratorWorkflow.receive_user_feedback, feedback)
+                    await handle.signal(CommunisOrchestratorWorkflow.receive_user_feedback, feedback)
                     console.print(f"[dim]Feedback sent.[/dim]\n")
 
             elif status == "running":
@@ -579,7 +579,7 @@ def _prompt_for_feedback() -> str | None:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="autoRiff — Self-Directing Iterative Work Loop"
+        description="communis — Self-Directing Iterative Work Loop"
     )
     parser.add_argument("idea", metavar="prompt", help="The prompt or task to work on")
     parser.add_argument(
@@ -626,10 +626,10 @@ def main():
         help="Disable goal completion detection (requires --turns > 0)",
     )
     parser.add_argument(
-        "--max-subagents",
+        "--max-subcommunis",
         type=int,
         default=3,
-        help="Max parallel sub-agents (0 = disabled, default: 3, max: 5)",
+        help="Max parallel subcommunis (0 = disabled, default: 3, max: 5)",
     )
     args = parser.parse_args()
 
@@ -638,13 +638,13 @@ def main():
         console.print("[red]Error: --no-goal-detect requires --turns > 0[/red]")
         return
 
-    max_subagents = max(0, min(5, args.max_subagents))
+    max_subcommunis = max(0, min(5, args.max_subcommunis))
     goal_detect = not args.no_goal_detect
 
     asyncio.run(run_cli(
         args.idea, args.turns, args.model, args.auto, args.verbose,
         args.provider, args.base_url, args.output, args.dangerous,
-        goal_detect, max_subagents,
+        goal_detect, max_subcommunis,
     ))
 
 

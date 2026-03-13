@@ -1,14 +1,14 @@
-# Composability — Using autoRiff as a Building Block
+# Composability — Using communis as a Building Block
 
-autoRiff is a standard Temporal workflow. Any system that can start a Temporal workflow can use it — Python, Go, TypeScript, Java, or the Temporal CLI. This document shows how.
+communis is a standard Temporal workflow. Any system that can start a Temporal workflow can use it — Python, Go, TypeScript, Java, or the Temporal CLI. This document shows how.
 
 ## The Interface
 
-**Input:** `RiffConfig` dataclass
+**Input:** `CommunisConfig` dataclass
 
 ```python
 @dataclass
-class RiffConfig:
+class CommunisConfig:
     idea: str              # The prompt / task
     num_turns: int = 3     # How many iterative turns (1-10)
     model: str = "..."     # LLM model name
@@ -26,7 +26,7 @@ class RiffConfig:
     "current_turn": 3,
     "current_role": "Synthesizer",
     "status": "complete",           # "complete" | "cancelled" | "error"
-    "workspace_dir": ".autoriff/autoriff-a1b2c3d4/",
+    "workspace_dir": ".communis/communis-a1b2c3d4/",
     "latest_message": "All turns complete!",
     "turn_results": [
         {
@@ -35,7 +35,7 @@ class RiffConfig:
             "key_insights": ["insight 1", "insight 2"],
             "token_usage": {"input_tokens": 500, "output_tokens": 1200},
             "truncated": false,
-            "artifact_path": ".autoriff/autoriff-a1b2c3d4/turn-01-explorer.md"
+            "artifact_path": ".communis/communis-a1b2c3d4/turn-01-explorer.md"
         },
         # ... one per turn
     ]
@@ -51,33 +51,33 @@ class RiffConfig:
 - `get_turn_result(turn_number: int) -> dict | None` — single turn result
 - `get_all_results() -> list[dict]` — all completed turn results
 
-**Task Queue:** `autoriff-task-queue`
+**Task Queue:** `communis-task-queue`
 
 ---
 
 ## Pattern 1: Child Workflow (Python)
 
-Call autoRiff from another Temporal workflow. The parent orchestrates multiple riff sessions, chains results, or makes decisions based on outputs.
+Call communis from another Temporal workflow. The parent orchestrates multiple communis sessions, chains results, or makes decisions based on outputs.
 
 ```python
 # workflows/research_pipeline.py
 from temporalio import workflow
 
 with workflow.unsafe.imports_passed_through():
-    from models.data_types import RiffConfig
-    from workflows.riff_orchestrator import RiffOrchestratorWorkflow
+    from models.data_types import CommunisConfig
+    from workflows.communis_orchestrator import CommunisOrchestratorWorkflow
 
 
 @workflow.defn
 class ResearchPipelineWorkflow:
-    """Run multiple autoRiff sessions to research a topic from different angles."""
+    """Run multiple communis sessions to research a topic from different angles."""
 
     @workflow.run
     async def run(self, topic: str) -> dict:
         # Phase 1: Broad exploration
         explore_result = await workflow.execute_child_workflow(
-            RiffOrchestratorWorkflow.run,
-            RiffConfig(
+            CommunisOrchestratorWorkflow.run,
+            CommunisConfig(
                 idea=f"Research and explore: {topic}",
                 num_turns=3,
                 auto=True,
@@ -92,8 +92,8 @@ class ResearchPipelineWorkflow:
 
         # Phase 2: Deep dive on the most interesting findings
         deep_dive_result = await workflow.execute_child_workflow(
-            RiffOrchestratorWorkflow.run,
-            RiffConfig(
+            CommunisOrchestratorWorkflow.run,
+            CommunisConfig(
                 idea=(
                     f"Deep dive on: {topic}\n\n"
                     f"Prior research found these key insights:\n"
@@ -109,8 +109,8 @@ class ResearchPipelineWorkflow:
 
         # Phase 3: Synthesize into a final deliverable
         final_result = await workflow.execute_child_workflow(
-            RiffOrchestratorWorkflow.run,
-            RiffConfig(
+            CommunisOrchestratorWorkflow.run,
+            CommunisConfig(
                 idea=(
                     f"Create a comprehensive report on: {topic}\n\n"
                     f"Exploration insights:\n"
@@ -148,15 +148,15 @@ class ResearchPipelineWorkflow:
 ```python
 # scripts/run_pipeline_worker.py
 from workflows.research_pipeline import ResearchPipelineWorkflow
-from workflows.riff_orchestrator import RiffOrchestratorWorkflow
-from workflows.riff_turn import RiffTurnWorkflow
+from workflows.communis_orchestrator import CommunisOrchestratorWorkflow
+from workflows.communis_turn import CommunisTurnWorkflow
 
 # ... (import all activities)
 
 worker = Worker(
     client,
-    task_queue="autoriff-task-queue",
-    workflows=[ResearchPipelineWorkflow, RiffOrchestratorWorkflow, RiffTurnWorkflow],
+    task_queue="communis-task-queue",
+    workflows=[ResearchPipelineWorkflow, CommunisOrchestratorWorkflow, CommunisTurnWorkflow],
     activities=[...],  # all 11 activities
 )
 ```
@@ -165,7 +165,7 @@ worker = Worker(
 
 ## Pattern 2: Parallel Fan-Out
 
-Run multiple riff sessions concurrently and combine results. Useful when you need different perspectives on the same problem.
+Run multiple communis sessions concurrently and combine results. Useful when you need different perspectives on the same problem.
 
 ```python
 @workflow.defn
@@ -176,11 +176,11 @@ class ParallelAnalysisWorkflow:
     async def run(self, problem: str) -> dict:
         import asyncio
 
-        # Launch three riff sessions in parallel
+        # Launch three communis sessions in parallel
         tasks = [
             workflow.execute_child_workflow(
-                RiffOrchestratorWorkflow.run,
-                RiffConfig(
+                CommunisOrchestratorWorkflow.run,
+                CommunisConfig(
                     idea=f"Analyze from a TECHNICAL perspective: {problem}",
                     num_turns=3,
                     auto=True,
@@ -188,8 +188,8 @@ class ParallelAnalysisWorkflow:
                 id=f"{workflow.info().workflow_id}-technical",
             ),
             workflow.execute_child_workflow(
-                RiffOrchestratorWorkflow.run,
-                RiffConfig(
+                CommunisOrchestratorWorkflow.run,
+                CommunisConfig(
                     idea=f"Analyze from a BUSINESS perspective: {problem}",
                     num_turns=3,
                     auto=True,
@@ -197,8 +197,8 @@ class ParallelAnalysisWorkflow:
                 id=f"{workflow.info().workflow_id}-business",
             ),
             workflow.execute_child_workflow(
-                RiffOrchestratorWorkflow.run,
-                RiffConfig(
+                CommunisOrchestratorWorkflow.run,
+                CommunisConfig(
                     idea=f"Analyze from a USER EXPERIENCE perspective: {problem}",
                     num_turns=3,
                     auto=True,
@@ -217,8 +217,8 @@ class ParallelAnalysisWorkflow:
                     all_insights.append(f"[{label}] {insight}")
 
         synthesis = await workflow.execute_child_workflow(
-            RiffOrchestratorWorkflow.run,
-            RiffConfig(
+            CommunisOrchestratorWorkflow.run,
+            CommunisConfig(
                 idea=(
                     f"Synthesize these multi-perspective findings on: {problem}\n\n"
                     + "\n".join(f"- {i}" for i in all_insights)
@@ -245,15 +245,15 @@ class ParallelAnalysisWorkflow:
 
 ## Pattern 3: External Client (Python SDK)
 
-Start and monitor a riff session from any Python service — a web app, a cron job, a Slack bot, etc. No need to be a Temporal workflow.
+Start and monitor a communis session from any Python service — a web app, a cron job, a Slack bot, etc. No need to be a Temporal workflow.
 
 ```python
 # examples/external_client.py
-"""Start an autoRiff session from outside Temporal."""
+"""Start an communis session from outside Temporal."""
 import asyncio
 from temporalio.client import Client
-from models.data_types import RiffConfig
-from workflows.riff_orchestrator import RiffOrchestratorWorkflow
+from models.data_types import CommunisConfig
+from workflows.communis_orchestrator import CommunisOrchestratorWorkflow
 
 
 async def main():
@@ -261,21 +261,21 @@ async def main():
 
     # Start the workflow
     handle = await client.start_workflow(
-        RiffOrchestratorWorkflow.run,
-        RiffConfig(
+        CommunisOrchestratorWorkflow.run,
+        CommunisConfig(
             idea="Design a notification system for a SaaS platform",
             num_turns=4,
             auto=True,
         ),
-        id="riff-notifications-design",
-        task_queue="autoriff-task-queue",
+        id="communis-notifications-design",
+        task_queue="communis-task-queue",
     )
 
     print(f"Started workflow: {handle.id}")
 
     # Poll for progress
     while True:
-        state = await handle.query(RiffOrchestratorWorkflow.get_state)
+        state = await handle.query(CommunisOrchestratorWorkflow.get_state)
         print(f"  Turn {state['current_turn']}/{state['num_turns']} — {state['current_role']} — {state['status']}")
 
         if state["status"] in ("complete", "cancelled", "error"):
@@ -301,29 +301,29 @@ Same as above, but inject human feedback between turns instead of running in aut
 
 ```python
 # examples/external_client_feedback.py
-"""Start an autoRiff session and provide feedback between turns."""
+"""Start an communis session and provide feedback between turns."""
 import asyncio
 from temporalio.client import Client
-from models.data_types import RiffConfig
-from workflows.riff_orchestrator import RiffOrchestratorWorkflow
+from models.data_types import CommunisConfig
+from workflows.communis_orchestrator import CommunisOrchestratorWorkflow
 
 
 async def main():
     client = await Client.connect("localhost:7233")
 
     handle = await client.start_workflow(
-        RiffOrchestratorWorkflow.run,
-        RiffConfig(
+        CommunisOrchestratorWorkflow.run,
+        CommunisConfig(
             idea="Plan a company offsite for 50 people",
             num_turns=4,
             auto=False,  # Will pause for feedback between turns
         ),
-        id="riff-offsite-planning",
-        task_queue="autoriff-task-queue",
+        id="communis-offsite-planning",
+        task_queue="communis-task-queue",
     )
 
     while True:
-        state = await handle.query(RiffOrchestratorWorkflow.get_state)
+        state = await handle.query(CommunisOrchestratorWorkflow.get_state)
 
         if state["status"] == "waiting_for_feedback":
             # Show the latest turn results
@@ -335,9 +335,9 @@ async def main():
             # Get feedback (from a user, a Slack message, an API call, etc.)
             feedback = input("\nFeedback (Enter to skip): ").strip()
             if feedback:
-                await handle.signal(RiffOrchestratorWorkflow.receive_user_feedback, feedback)
+                await handle.signal(CommunisOrchestratorWorkflow.receive_user_feedback, feedback)
             else:
-                await handle.signal(RiffOrchestratorWorkflow.skip_feedback)
+                await handle.signal(CommunisOrchestratorWorkflow.skip_feedback)
 
         elif state["status"] in ("complete", "cancelled", "error"):
             break
@@ -355,7 +355,7 @@ asyncio.run(main())
 
 ## Pattern 5: From a Go Service
 
-Any language with a Temporal SDK can start autoRiff. The workflow ID, task queue, and config shape are all you need.
+Any language with a Temporal SDK can start communis. The workflow ID, task queue, and config shape are all you need.
 
 ```go
 // main.go
@@ -368,8 +368,8 @@ import (
     "go.temporal.io/sdk/client"
 )
 
-// RiffConfig mirrors the Python dataclass — Temporal serializes as JSON
-type RiffConfig struct {
+// CommunisConfig mirrors the Python dataclass — Temporal serializes as JSON
+type CommunisConfig struct {
     Idea     string `json:"idea"`
     NumTurns int    `json:"num_turns"`
     Model    string `json:"model"`
@@ -388,11 +388,11 @@ func main() {
     run, err := c.ExecuteWorkflow(
         context.Background(),
         client.StartWorkflowOptions{
-            ID:        "riff-from-go",
-            TaskQueue: "autoriff-task-queue",
+            ID:        "communis-from-go",
+            TaskQueue: "communis-task-queue",
         },
-        "RiffOrchestratorWorkflow",  // workflow type name
-        RiffConfig{
+        "CommunisOrchestratorWorkflow",  // workflow type name
+        CommunisConfig{
             Idea:     "Design a caching strategy for a read-heavy API",
             NumTurns: 3,
             Auto:     true,
@@ -418,10 +418,10 @@ func main() {
 ## Pattern 6: From TypeScript
 
 ```typescript
-// start-riff.ts
+// start-communis.ts
 import { Client, Connection } from "@temporalio/client";
 
-interface RiffConfig {
+interface CommunisConfig {
   idea: string;
   num_turns: number;
   model?: string;
@@ -434,16 +434,16 @@ async function main() {
   const connection = await Connection.connect({ address: "localhost:7233" });
   const client = new Client({ connection });
 
-  const handle = await client.workflow.start("RiffOrchestratorWorkflow", {
+  const handle = await client.workflow.start("CommunisOrchestratorWorkflow", {
     args: [
       {
         idea: "Design a real-time collaboration feature for a document editor",
         num_turns: 4,
         auto: true,
-      } satisfies RiffConfig,
+      } satisfies CommunisConfig,
     ],
-    taskQueue: "autoriff-task-queue",
-    workflowId: "riff-from-typescript",
+    taskQueue: "communis-task-queue",
+    workflowId: "communis-from-typescript",
   });
 
   console.log(`Started: ${handle.workflowId}`);
@@ -464,59 +464,59 @@ main().catch(console.error);
 
 ## Pattern 7: Temporal CLI (No Code)
 
-Start a riff session directly from the command line. Useful for testing or one-off runs.
+Start a communis session directly from the command line. Useful for testing or one-off runs.
 
 ```bash
 # Start a workflow
 temporal workflow start \
-  --type RiffOrchestratorWorkflow \
-  --task-queue autoriff-task-queue \
-  --workflow-id "riff-cli-test" \
+  --type CommunisOrchestratorWorkflow \
+  --task-queue communis-task-queue \
+  --workflow-id "communis-cli-test" \
   --input '{"idea": "Compare microservices vs monolith for a startup MVP", "num_turns": 3, "auto": true}'
 
 # Check status
 temporal workflow query \
-  --workflow-id "riff-cli-test" \
+  --workflow-id "communis-cli-test" \
   --type get_state
 
 # Send feedback (if not auto)
 temporal workflow signal \
-  --workflow-id "riff-cli-test" \
+  --workflow-id "communis-cli-test" \
   --name receive_user_feedback \
   --input '"Focus on cost and speed to market"'
 
 # Skip feedback
 temporal workflow signal \
-  --workflow-id "riff-cli-test" \
+  --workflow-id "communis-cli-test" \
   --name skip_feedback
 
 # Cancel
-temporal workflow cancel --workflow-id "riff-cli-test"
+temporal workflow cancel --workflow-id "communis-cli-test"
 
 # Get final result
-temporal workflow show --workflow-id "riff-cli-test"
+temporal workflow show --workflow-id "communis-cli-test"
 ```
 
 ---
 
 ## Pattern 8: FastAPI Wrapper
 
-Expose autoRiff as a REST API so any HTTP client (frontend, mobile app, webhook) can use it.
+Expose communis as a REST API so any HTTP client (frontend, mobile app, webhook) can use it.
 
 ```python
 # examples/api_server.py
-"""REST API wrapper around autoRiff."""
+"""REST API wrapper around communis."""
 import uuid
 from fastapi import FastAPI
 from pydantic import BaseModel
 from temporalio.client import Client
-from models.data_types import RiffConfig
-from workflows.riff_orchestrator import RiffOrchestratorWorkflow
+from models.data_types import CommunisConfig
+from workflows.communis_orchestrator import CommunisOrchestratorWorkflow
 
-app = FastAPI(title="autoRiff API")
+app = FastAPI(title="communis API")
 temporal: Client = None
 
-TASK_QUEUE = "autoriff-task-queue"
+TASK_QUEUE = "communis-task-queue"
 
 
 class StartRequest(BaseModel):
@@ -538,13 +538,13 @@ async def startup():
     temporal = await Client.connect("localhost:7233")
 
 
-@app.post("/riff")
-async def start_riff(req: StartRequest):
-    """Start a new autoRiff session."""
-    workflow_id = f"riff-{uuid.uuid4().hex[:8]}"
+@app.post("/communis")
+async def start_communis(req: StartRequest):
+    """Start a new communis session."""
+    workflow_id = f"communis-{uuid.uuid4().hex[:8]}"
     handle = await temporal.start_workflow(
-        RiffOrchestratorWorkflow.run,
-        RiffConfig(
+        CommunisOrchestratorWorkflow.run,
+        CommunisConfig(
             idea=req.idea,
             num_turns=req.num_turns,
             model=req.model or "claude-sonnet-4-5-20250929",
@@ -558,39 +558,39 @@ async def start_riff(req: StartRequest):
     return {"workflow_id": handle.id}
 
 
-@app.get("/riff/{workflow_id}")
+@app.get("/communis/{workflow_id}")
 async def get_status(workflow_id: str):
-    """Get current state of a riff session."""
+    """Get current state of a communis session."""
     handle = temporal.get_workflow_handle(workflow_id)
-    return await handle.query(RiffOrchestratorWorkflow.get_state)
+    return await handle.query(CommunisOrchestratorWorkflow.get_state)
 
 
-@app.get("/riff/{workflow_id}/result")
+@app.get("/communis/{workflow_id}/result")
 async def get_result(workflow_id: str):
     """Get final result (blocks until complete)."""
     handle = temporal.get_workflow_handle(workflow_id)
     return await handle.result()
 
 
-@app.post("/riff/{workflow_id}/feedback")
+@app.post("/communis/{workflow_id}/feedback")
 async def send_feedback(workflow_id: str, req: FeedbackRequest):
-    """Send feedback to a paused riff session."""
+    """Send feedback to a paused communis session."""
     handle = temporal.get_workflow_handle(workflow_id)
-    await handle.signal(RiffOrchestratorWorkflow.receive_user_feedback, req.feedback)
+    await handle.signal(CommunisOrchestratorWorkflow.receive_user_feedback, req.feedback)
     return {"status": "sent"}
 
 
-@app.post("/riff/{workflow_id}/skip")
+@app.post("/communis/{workflow_id}/skip")
 async def skip_feedback(workflow_id: str):
     """Skip the feedback pause and continue."""
     handle = temporal.get_workflow_handle(workflow_id)
-    await handle.signal(RiffOrchestratorWorkflow.skip_feedback)
+    await handle.signal(CommunisOrchestratorWorkflow.skip_feedback)
     return {"status": "skipped"}
 
 
-@app.post("/riff/{workflow_id}/cancel")
-async def cancel_riff(workflow_id: str):
-    """Cancel a running riff session."""
+@app.post("/communis/{workflow_id}/cancel")
+async def cancel_communis(workflow_id: str):
+    """Cancel a running communis session."""
     handle = temporal.get_workflow_handle(workflow_id)
     await handle.cancel()
     return {"status": "cancelled"}
@@ -607,15 +607,15 @@ Then:
 
 ```bash
 # Start a session
-curl -X POST http://localhost:8000/riff \
+curl -X POST http://localhost:8000/communis \
   -H "Content-Type: application/json" \
   -d '{"idea": "Design an onboarding flow for a dev tools product", "num_turns": 3}'
 
 # Check status
-curl http://localhost:8000/riff/riff-a1b2c3d4
+curl http://localhost:8000/communis/communis-a1b2c3d4
 
 # Send feedback
-curl -X POST http://localhost:8000/riff/riff-a1b2c3d4/feedback \
+curl -X POST http://localhost:8000/communis/communis-a1b2c3d4/feedback \
   -H "Content-Type: application/json" \
   -d '{"feedback": "Focus on time-to-first-value"}'
 ```
@@ -652,8 +652,8 @@ For distributed systems where the client isn't on the same machine as the worker
 
 ## Key Constraints
 
-- **Task queue**: The autoRiff worker must be running on `autoriff-task-queue` (or whatever you configure). Your parent workflow can be on any task queue — child workflows inherit the parent's task queue by default, so override it if needed.
+- **Task queue**: The communis worker must be running on `communis-task-queue` (or whatever you configure). Your parent workflow can be on any task queue — child workflows inherit the parent's task queue by default, so override it if needed.
 - **Workspace files**: Turn artifacts are written to the local filesystem of the worker. For multi-machine setups, use shared storage or the claim-check pattern with S3.
-- **Serialization**: `RiffConfig` is a Python dataclass. Temporal serializes it as JSON. Cross-language clients just need to send the right JSON shape.
+- **Serialization**: `CommunisConfig` is a Python dataclass. Temporal serializes it as JSON. Cross-language clients just need to send the right JSON shape.
 - **auto=True for child workflows**: Unless your parent workflow is going to signal feedback, always set `auto=True`. Otherwise the child will pause for 120s waiting for feedback that never comes.
-- **Cancellation propagates**: If you cancel the parent workflow, Temporal cancels child workflows too. autoRiff handles this gracefully and returns partial results.
+- **Cancellation propagates**: If you cancel the parent workflow, Temporal cancels child workflows too. communis handles this gracefully and returns partial results.

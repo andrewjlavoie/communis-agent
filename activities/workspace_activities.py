@@ -6,7 +6,7 @@ from pathlib import Path
 import yaml
 from temporalio import activity
 
-WORKSPACE_BASE = os.getenv("AUTORIFF_WORKSPACE", ".autoriff")
+WORKSPACE_BASE = os.getenv("COMMUNIS_WORKSPACE", ".communis")
 
 # How many recent turn files to include as full content in context
 MAX_RECENT_FILES = 3
@@ -63,7 +63,7 @@ def _build_turn_file(
 
 @activity.defn
 async def init_workspace(workflow_id: str, idea: str, max_turns: int, model: str) -> str:
-    """Create workspace directory and write riff.md manifest. Returns workspace_dir path."""
+    """Create workspace directory and write communis.md manifest. Returns workspace_dir path."""
     ws = _workspace_dir(workflow_id)
     ws.mkdir(parents=True, exist_ok=True)
 
@@ -75,7 +75,7 @@ async def init_workspace(workflow_id: str, idea: str, max_turns: int, model: str
     }
     manifest_yaml = yaml.dump(manifest, default_flow_style=False, sort_keys=False).strip()
     riff_md = f"---\n{manifest_yaml}\n---\n# {idea}\n"
-    (ws / "riff.md").write_text(riff_md)
+    (ws / "communis.md").write_text(riff_md)
 
     return str(ws)
 
@@ -187,8 +187,8 @@ async def write_plan_file(workspace_dir: str, plan_content: str) -> None:
 
 
 @activity.defn
-async def write_subagent_summary(workspace_dir: str, turn_number: int, summary: str) -> None:
-    """Write sub-agent results summary to workspace."""
+async def write_subcommunis_summary(workspace_dir: str, turn_number: int, summary: str) -> None:
+    """Write subcommunis results summary to workspace."""
     ws = Path(workspace_dir)
-    filename = f"subagents-step-{turn_number:02d}.md"
+    filename = f"subcommunis-step-{turn_number:02d}.md"
     (ws / filename).write_text(summary)

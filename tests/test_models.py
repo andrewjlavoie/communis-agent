@@ -1,16 +1,16 @@
 """Tests for data models — serialization round-trips and state management."""
 
-from models.data_types import RiffConfig, RiffState, SubAgentResult, SubAgentTask, TurnConfig, TurnResult
+from models.data_types import CommunisConfig, CommunisState, SubCommunisResult, SubCommunisTask, TurnConfig, TurnResult
 
 
-def test_riff_config_defaults():
-    config = RiffConfig(idea="test idea")
+def test_communis_config_defaults():
+    config = CommunisConfig(idea="test idea")
     assert config.idea == "test idea"
     assert config.max_turns == 0
     assert config.model == "claude-sonnet-4-5-20250929"
     assert config.auto is False
     assert config.goal_complete_detection is True
-    assert config.max_subagents == 3
+    assert config.max_subcommunis == 3
 
 
 def test_turn_config_defaults():
@@ -35,8 +35,8 @@ def test_turn_result_defaults():
     assert result.artifact_path == ""
 
 
-def test_riff_state_to_dict():
-    state = RiffState(
+def test_communis_state_to_dict():
+    state = CommunisState(
         idea="test idea",
         max_turns=3,
         current_turn=1,
@@ -53,8 +53,8 @@ def test_riff_state_to_dict():
     assert d["goal_complete"] is False
 
 
-def test_riff_state_with_turn_results():
-    state = RiffState(idea="test")
+def test_communis_state_with_turn_results():
+    state = CommunisState(idea="test")
     result = TurnResult(
         turn_number=1,
         role="Explorer",
@@ -84,14 +84,14 @@ def test_turn_config_with_feedback():
     assert config.role == "Devil's Advocate"
 
 
-def test_subagent_task_defaults():
-    task = SubAgentTask(task="Research API docs")
+def test_subcommunis_task_defaults():
+    task = SubCommunisTask(task="Research API docs")
     assert task.task == "Research API docs"
     assert task.max_turns == 5
 
 
-def test_subagent_result_defaults():
-    result = SubAgentResult(task="Do something", status="complete", summary="Done")
+def test_subcommunis_result_defaults():
+    result = SubCommunisResult(task="Do something", status="complete", summary="Done")
     assert result.task == "Do something"
     assert result.status == "complete"
     assert result.turn_results == []

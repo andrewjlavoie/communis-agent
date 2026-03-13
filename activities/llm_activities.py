@@ -6,11 +6,11 @@ import re
 
 from temporalio import activity
 
-from prompts.riff_prompts import (
+from prompts.communis_prompts import (
     EXTRACT_INSIGHTS_PROMPT,
     PLANNER_PROMPT,
     SUMMARIZE_ARTIFACTS_PROMPT,
-    SUMMARIZE_SUBAGENT_RESULTS_PROMPT,
+    SUMMARIZE_SUBCOMMUNIS_RESULTS_PROMPT,
     VALIDATE_FEEDBACK_PROMPT,
 )
 
@@ -277,7 +277,7 @@ async def call_claude(
 async def plan_next_turn(context: str, provider: str = "", base_url: str = "", model: str = "") -> dict:
     """Use LLM to decide the role and instructions for the next turn agent.
 
-    Returns dict with keys: role, instructions, reasoning, goal_complete, action, subagents, plan_summary.
+    Returns dict with keys: role, instructions, reasoning, goal_complete, action, subcommunis, plan_summary.
     """
     response = await _call_llm(
         messages=[{"role": "user", "content": context}],
@@ -317,7 +317,7 @@ async def plan_next_turn(context: str, provider: str = "", base_url: str = "", m
         "reasoning": parsed.get("reasoning", ""),
         "goal_complete": parsed.get("goal_complete", False),
         "action": parsed.get("action", "step"),
-        "subagents": parsed.get("subagents", []),
+        "subcommunis": parsed.get("subcommunis", []),
         "plan_summary": parsed.get("plan_summary", ""),
     }
 
@@ -403,18 +403,18 @@ async def validate_user_feedback(feedback: str, idea: str, provider: str = "", b
 
 
 @activity.defn
-async def summarize_subagent_results(
+async def summarize_subcommunis_results(
     results_text: str, goal_context: str, provider: str = "", base_url: str = "", model: str = ""
 ) -> str:
-    """Summarize sub-agent results for injection into parent context."""
+    """Summarize subcommunis results for injection into parent context."""
     response = await _call_llm(
         messages=[
             {
                 "role": "user",
-                "content": f"Parent goal: {goal_context}\n\nSub-agent results:\n{results_text}",
+                "content": f"Parent goal: {goal_context}\n\nSubcommunis results:\n{results_text}",
             }
         ],
-        system_prompt=SUMMARIZE_SUBAGENT_RESULTS_PROMPT,
+        system_prompt=SUMMARIZE_SUBCOMMUNIS_RESULTS_PROMPT,
         model=model or FAST_MODEL,
         max_tokens=FAST_MAX_TOKENS or 1024,
         provider=provider,

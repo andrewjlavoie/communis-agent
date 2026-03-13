@@ -1,6 +1,6 @@
 # Prompts Reference
 
-All prompts used by autoRiff, extracted from `prompts/riff_prompts.py` for reference.
+All prompts used by communis, extracted from `prompts/communis_prompts.py` for reference.
 
 ## PLANNER_PROMPT
 

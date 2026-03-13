@@ -1,4 +1,4 @@
-"""Example: Parallel multi-perspective analysis using autoRiff.
+"""Example: Parallel multi-perspective analysis using communis.
 
 Launches three riff sessions concurrently (technical, business, UX),
 then synthesizes all findings in a fourth session.
@@ -16,8 +16,8 @@ from temporalio import workflow
 from temporalio.client import Client
 
 with workflow.unsafe.imports_passed_through():
-    from models.data_types import RiffConfig
-    from workflows.riff_orchestrator import RiffOrchestratorWorkflow
+    from models.data_types import CommunisConfig
+    from workflows.communis_orchestrator import CommunisOrchestratorWorkflow
 
 
 PERSPECTIVES = [
@@ -38,8 +38,8 @@ class ParallelAnalysisWorkflow:
         # Fan out: run all perspectives in parallel
         tasks = [
             workflow.execute_child_workflow(
-                RiffOrchestratorWorkflow.run,
-                RiffConfig(
+                CommunisOrchestratorWorkflow.run,
+                CommunisConfig(
                     idea=f"{angle}: {problem}",
                     num_turns=3,
                     auto=True,
@@ -61,8 +61,8 @@ class ParallelAnalysisWorkflow:
 
         # Synthesize
         synthesis = await workflow.execute_child_workflow(
-            RiffOrchestratorWorkflow.run,
-            RiffConfig(
+            CommunisOrchestratorWorkflow.run,
+            CommunisConfig(
                 idea=(
                     f"Synthesize multi-perspective analysis of: {problem}\n\n"
                     f"Findings from three parallel analyses:\n"
@@ -99,14 +99,14 @@ async def main():
         collect_older_turns_text, init_workspace, read_turn_context,
         read_turn_file, write_turn_artifact, write_workspace_summary,
     )
-    from workflows.riff_turn import RiffTurnWorkflow
+    from workflows.communis_turn import CommunisTurnWorkflow
 
-    task_queue = "autoriff-task-queue"
+    task_queue = "communis-task-queue"
 
     async with Worker(
         client,
         task_queue=task_queue,
-        workflows=[ParallelAnalysisWorkflow, RiffOrchestratorWorkflow, RiffTurnWorkflow],
+        workflows=[ParallelAnalysisWorkflow, CommunisOrchestratorWorkflow, CommunisTurnWorkflow],
         activities=[
             call_claude, plan_next_turn, extract_key_insights,
             summarize_artifacts, validate_user_feedback,

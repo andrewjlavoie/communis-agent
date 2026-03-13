@@ -10,7 +10,7 @@ from activities.llm_activities import (
     extract_key_insights,
     plan_next_turn,
     summarize_artifacts,
-    summarize_subagent_results,
+    summarize_subcommunis_results,
     validate_user_feedback,
 )
 from activities.tool_activities import execute_run_command
@@ -20,14 +20,14 @@ from activities.workspace_activities import (
     read_turn_context,
     read_turn_file,
     write_plan_file,
-    write_subagent_summary,
+    write_subcommunis_summary,
     write_turn_artifact,
     write_workspace_summary,
 )
-from workflows.riff_orchestrator import RiffOrchestratorWorkflow
-from workflows.riff_turn import RiffTurnWorkflow
+from workflows.communis_orchestrator import CommunisOrchestratorWorkflow
+from workflows.communis_turn import CommunisTurnWorkflow
 
-TASK_QUEUE = "autoriff-task-queue"
+TASK_QUEUE = "communis-task-queue"
 
 
 async def main():
@@ -41,14 +41,14 @@ async def main():
     worker = Worker(
         client,
         task_queue=TASK_QUEUE,
-        workflows=[RiffOrchestratorWorkflow, RiffTurnWorkflow],
+        workflows=[CommunisOrchestratorWorkflow, CommunisTurnWorkflow],
         activities=[
             # LLM activities
             call_claude,
             extract_key_insights,
             plan_next_turn,
             summarize_artifacts,
-            summarize_subagent_results,
+            summarize_subcommunis_results,
             validate_user_feedback,
             # Tool activities
             execute_run_command,
@@ -60,10 +60,10 @@ async def main():
             read_turn_file,
             collect_older_turns_text,
             write_plan_file,
-            write_subagent_summary,
+            write_subcommunis_summary,
         ],
     )
-    print(f"autoRiff worker started on task queue: {TASK_QUEUE}")
+    print(f"communis worker started on task queue: {TASK_QUEUE}")
     print("Waiting for workflows...")
     await worker.run()
 

@@ -1,4 +1,4 @@
-"""Unix-style run(command="...") tool for the autoRiff agent.
+"""Unix-style run(command="...") tool for the communis agent.
 
 Implements the *nix agent philosophy: a single run tool that executes shell
 commands, with a two-layer architecture:
@@ -51,7 +51,7 @@ RUN_TOOL_DEFINITION = {
 MAX_OUTPUT_LINES = 200
 MAX_OUTPUT_BYTES = 50 * 1024  # 50KB
 BINARY_CONTROL_RATIO = 0.10  # >10% control chars = binary
-OVERFLOW_DIR = os.path.join(tempfile.gettempdir(), "autoriff-cmd-output")
+OVERFLOW_DIR = os.path.join(tempfile.gettempdir(), "communis-cmd-output")
 
 # Track overflow file counter per-process
 _overflow_counter = 0

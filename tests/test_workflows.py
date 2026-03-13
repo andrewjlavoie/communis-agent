@@ -11,9 +11,9 @@ from temporalio import activity
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
-from models.data_types import RiffConfig, TurnConfig
-from workflows.riff_orchestrator import RiffOrchestratorWorkflow
-from workflows.riff_turn import RiffTurnWorkflow
+from models.data_types import CommunisConfig, TurnConfig
+from workflows.communis_orchestrator import CommunisOrchestratorWorkflow
+from workflows.communis_turn import CommunisTurnWorkflow
 
 TASK_QUEUE = "test-queue"
 
@@ -24,7 +24,7 @@ _test_workspace_dir: str = ""
 def _get_test_workspace() -> str:
     global _test_workspace_dir
     if not _test_workspace_dir:
-        _test_workspace_dir = tempfile.mkdtemp(prefix="autoriff-test-")
+        _test_workspace_dir = tempfile.mkdtemp(prefix="communis-test-")
     return _test_workspace_dir
 
 
@@ -64,7 +64,7 @@ async def mock_plan_next_turn(context: str, provider: str = "", base_url: str = 
         "reasoning": "Starting with open exploration.",
         "goal_complete": False,
         "action": "step",
-        "subagents": [],
+        "subcommunis": [],
         "plan_summary": "",
     }
 
@@ -79,11 +79,11 @@ async def mock_validate_user_feedback(feedback: str, idea: str, provider: str = 
     return {"relevant": True, "reason": "Feedback is relevant."}
 
 
-@activity.defn(name="summarize_subagent_results")
-async def mock_summarize_subagent_results(
+@activity.defn(name="summarize_subcommunis_results")
+async def mock_summarize_subcommunis_results(
     results_text: str, goal_context: str, provider: str = "", base_url: str = "", model: str = ""
 ) -> str:
-    return f"Sub-agent summary: {len(results_text)} chars."
+    return f"Subcommunis summary: {len(results_text)} chars."
 
 
 # --- Mock tool activities ---
@@ -109,7 +109,7 @@ async def mock_execute_run_command(
 async def mock_init_workspace(workflow_id: str, idea: str, max_turns: int, model: str) -> str:
     ws = Path(_get_test_workspace()) / workflow_id
     ws.mkdir(parents=True, exist_ok=True)
-    (ws / "riff.md").write_text(f"# {idea}\n")
+    (ws / "communis.md").write_text(f"# {idea}\n")
     return str(ws)
 
 
@@ -152,9 +152,9 @@ async def mock_write_plan_file(workspace_dir: str, plan_content: str) -> None:
     Path(workspace_dir, "plan.md").write_text(plan_content)
 
 
-@activity.defn(name="write_subagent_summary")
-async def mock_write_subagent_summary(workspace_dir: str, turn_number: int, summary: str) -> None:
-    Path(workspace_dir, f"subagents-step-{turn_number:02d}.md").write_text(summary)
+@activity.defn(name="write_subcommunis_summary")
+async def mock_write_subcommunis_summary(workspace_dir: str, turn_number: int, summary: str) -> None:
+    Path(workspace_dir, f"subcommunis-step-{turn_number:02d}.md").write_text(summary)
 
 
 ALL_MOCK_ACTIVITIES = [
@@ -164,7 +164,7 @@ ALL_MOCK_ACTIVITIES = [
     mock_plan_next_turn,
     mock_summarize_artifacts,
     mock_validate_user_feedback,
-    mock_summarize_subagent_results,
+    mock_summarize_subcommunis_results,
     # Tool
     mock_execute_run_command,
     # Workspace
@@ -174,10 +174,10 @@ ALL_MOCK_ACTIVITIES = [
     mock_write_workspace_summary,
     mock_collect_older_turns_text,
     mock_write_plan_file,
-    mock_write_subagent_summary,
+    mock_write_subcommunis_summary,
 ]
 
-ALL_WORKFLOWS = [RiffOrchestratorWorkflow, RiffTurnWorkflow]
+ALL_WORKFLOWS = [CommunisOrchestratorWorkflow, CommunisTurnWorkflow]
 
 
 @pytest.fixture
@@ -195,15 +195,15 @@ def reset_workspace():
 
 
 @pytest.mark.asyncio
-async def test_riff_turn_workflow(env):
+async def test_communis_turn_workflow(env):
     """Test that a single turn child workflow executes and returns a TurnResult."""
     # Create a temp workspace for this test
-    ws = Path(tempfile.mkdtemp(prefix="autoriff-test-turn-"))
+    ws = Path(tempfile.mkdtemp(prefix="communis-test-turn-"))
 
     async with Worker(
         env.client,
         task_queue=TASK_QUEUE,
-        workflows=[RiffTurnWorkflow],
+        workflows=[CommunisTurnWorkflow],
         activities=[mock_call_claude, mock_extract_key_insights, mock_read_turn_context, mock_write_turn_artifact],
     ):
         config = TurnConfig(
@@ -215,7 +215,7 @@ async def test_riff_turn_workflow(env):
             max_turns=3,
         )
         result = await env.client.execute_workflow(
-            RiffTurnWorkflow.run,
+            CommunisTurnWorkflow.run,
             config,
             id="test-turn-1",
             task_queue=TASK_QUEUE,
@@ -236,9 +236,9 @@ async def test_orchestrator_single_turn(env):
         workflows=ALL_WORKFLOWS,
         activities=ALL_MOCK_ACTIVITIES,
     ):
-        config = RiffConfig(idea="Test idea", max_turns=1, goal_complete_detection=False)
+        config = CommunisConfig(idea="Test idea", max_turns=1, goal_complete_detection=False)
         result = await env.client.execute_workflow(
-            RiffOrchestratorWorkflow.run,
+            CommunisOrchestratorWorkflow.run,
             config,
             id="test-orch-1",
             task_queue=TASK_QUEUE,
@@ -259,9 +259,9 @@ async def test_orchestrator_multi_turn_auto(env):
         workflows=ALL_WORKFLOWS,
         activities=ALL_MOCK_ACTIVITIES,
     ):
-        config = RiffConfig(idea="Test idea", max_turns=3, auto=True, goal_complete_detection=False)
+        config = CommunisConfig(idea="Test idea", max_turns=3, auto=True, goal_complete_detection=False)
         result = await env.client.execute_workflow(
-            RiffOrchestratorWorkflow.run,
+            CommunisOrchestratorWorkflow.run,
             config,
             id="test-orch-auto",
             task_queue=TASK_QUEUE,
@@ -281,19 +281,19 @@ async def test_orchestrator_multi_turn_with_skip(env):
         activities=ALL_MOCK_ACTIVITIES,
     ):
         handle = await env.client.start_workflow(
-            RiffOrchestratorWorkflow.run,
-            RiffConfig(idea="Test idea", max_turns=3, goal_complete_detection=False),
+            CommunisOrchestratorWorkflow.run,
+            CommunisConfig(idea="Test idea", max_turns=3, goal_complete_detection=False),
             id="test-orch-multi",
             task_queue=TASK_QUEUE,
         )
 
         for _ in range(2):  # 2 feedback waits for 3 turns
             for _attempt in range(30):
-                state = await handle.query(RiffOrchestratorWorkflow.get_state)
+                state = await handle.query(CommunisOrchestratorWorkflow.get_state)
                 if state["status"] == "waiting_for_feedback":
                     break
                 await asyncio.sleep(0.3)
-            await handle.signal(RiffOrchestratorWorkflow.skip_feedback)
+            await handle.signal(CommunisOrchestratorWorkflow.skip_feedback)
 
         result = await handle.result()
 
@@ -311,21 +311,21 @@ async def test_orchestrator_with_feedback(env):
         activities=ALL_MOCK_ACTIVITIES,
     ):
         handle = await env.client.start_workflow(
-            RiffOrchestratorWorkflow.run,
-            RiffConfig(idea="Test idea", max_turns=2, goal_complete_detection=False),
+            CommunisOrchestratorWorkflow.run,
+            CommunisConfig(idea="Test idea", max_turns=2, goal_complete_detection=False),
             id="test-orch-feedback",
             task_queue=TASK_QUEUE,
         )
 
         # Wait for feedback prompt after turn 1
         for _attempt in range(30):
-            state = await handle.query(RiffOrchestratorWorkflow.get_state)
+            state = await handle.query(CommunisOrchestratorWorkflow.get_state)
             if state["status"] == "waiting_for_feedback":
                 break
             await asyncio.sleep(0.3)
 
         await handle.signal(
-            RiffOrchestratorWorkflow.receive_user_feedback,
+            CommunisOrchestratorWorkflow.receive_user_feedback,
             "Focus on enterprise market",
         )
 
@@ -345,34 +345,34 @@ async def test_query_state(env):
         activities=ALL_MOCK_ACTIVITIES,
     ):
         handle = await env.client.start_workflow(
-            RiffOrchestratorWorkflow.run,
-            RiffConfig(idea="Query test idea", max_turns=2, goal_complete_detection=False),
+            CommunisOrchestratorWorkflow.run,
+            CommunisConfig(idea="Query test idea", max_turns=2, goal_complete_detection=False),
             id="test-orch-query",
             task_queue=TASK_QUEUE,
         )
 
         # Wait for first turn to complete
         for _attempt in range(30):
-            state = await handle.query(RiffOrchestratorWorkflow.get_state)
+            state = await handle.query(CommunisOrchestratorWorkflow.get_state)
             if state["status"] == "waiting_for_feedback":
                 break
             await asyncio.sleep(0.3)
 
-        state = await handle.query(RiffOrchestratorWorkflow.get_state)
+        state = await handle.query(CommunisOrchestratorWorkflow.get_state)
         assert state["idea"] == "Query test idea"
         assert state["max_turns"] == 2
         assert state["status"] == "waiting_for_feedback"
         assert len(state["turn_results"]) == 1
         assert state["workspace_dir"] != ""
 
-        turn1 = await handle.query(RiffOrchestratorWorkflow.get_turn_result, 1)
+        turn1 = await handle.query(CommunisOrchestratorWorkflow.get_turn_result, 1)
         assert turn1 is not None
         assert turn1["turn_number"] == 1
 
-        all_results = await handle.query(RiffOrchestratorWorkflow.get_all_results)
+        all_results = await handle.query(CommunisOrchestratorWorkflow.get_all_results)
         assert len(all_results) == 1
 
-        await handle.signal(RiffOrchestratorWorkflow.skip_feedback)
+        await handle.signal(CommunisOrchestratorWorkflow.skip_feedback)
         await handle.result()
 
 
@@ -385,9 +385,9 @@ async def test_orchestrator_summarization(env):
         workflows=ALL_WORKFLOWS,
         activities=ALL_MOCK_ACTIVITIES,
     ):
-        config = RiffConfig(idea="Summarization test", max_turns=6, auto=True, goal_complete_detection=False)
+        config = CommunisConfig(idea="Summarization test", max_turns=6, auto=True, goal_complete_detection=False)
         result = await env.client.execute_workflow(
-            RiffOrchestratorWorkflow.run,
+            CommunisOrchestratorWorkflow.run,
             config,
             id="test-orch-summarize",
             task_queue=TASK_QUEUE,
@@ -407,15 +407,15 @@ async def test_orchestrator_cancel_during_feedback(env):
         activities=ALL_MOCK_ACTIVITIES,
     ):
         handle = await env.client.start_workflow(
-            RiffOrchestratorWorkflow.run,
-            RiffConfig(idea="Cancel test", max_turns=3, goal_complete_detection=False),
+            CommunisOrchestratorWorkflow.run,
+            CommunisConfig(idea="Cancel test", max_turns=3, goal_complete_detection=False),
             id="test-orch-cancel",
             task_queue=TASK_QUEUE,
         )
 
         # Wait for feedback prompt after turn 1
         for _attempt in range(30):
-            state = await handle.query(RiffOrchestratorWorkflow.get_state)
+            state = await handle.query(CommunisOrchestratorWorkflow.get_state)
             if state["status"] == "waiting_for_feedback":
                 break
             await asyncio.sleep(0.3)
@@ -461,7 +461,7 @@ async def test_orchestrator_cancel_during_turn(env):
         mock_plan_next_turn,
         mock_summarize_artifacts,
         mock_validate_user_feedback,
-        mock_summarize_subagent_results,
+        mock_summarize_subcommunis_results,
         mock_execute_run_command,
         mock_init_workspace,
         mock_write_turn_artifact,
@@ -469,7 +469,7 @@ async def test_orchestrator_cancel_during_turn(env):
         mock_write_workspace_summary,
         mock_collect_older_turns_text,
         mock_write_plan_file,
-        mock_write_subagent_summary,
+        mock_write_subcommunis_summary,
     ]
 
     async with Worker(
@@ -479,15 +479,15 @@ async def test_orchestrator_cancel_during_turn(env):
         activities=slow_activities,
     ):
         handle = await env.client.start_workflow(
-            RiffOrchestratorWorkflow.run,
-            RiffConfig(idea="Cancel during turn test", max_turns=3, auto=True, goal_complete_detection=False),
+            CommunisOrchestratorWorkflow.run,
+            CommunisConfig(idea="Cancel during turn test", max_turns=3, auto=True, goal_complete_detection=False),
             id="test-orch-cancel-turn",
             task_queue=TASK_QUEUE,
         )
 
         # Wait for it to start running
         for _attempt in range(30):
-            state = await handle.query(RiffOrchestratorWorkflow.get_state)
+            state = await handle.query(CommunisOrchestratorWorkflow.get_state)
             if state["status"] == "running" and state["current_turn"] == 1:
                 break
             await asyncio.sleep(0.3)
@@ -549,12 +549,12 @@ async def test_turn_with_tool_use_dangerous(env):
                 "usage": {"input_tokens": 300, "output_tokens": 100},
             }
 
-    ws = Path(tempfile.mkdtemp(prefix="autoriff-test-tool-"))
+    ws = Path(tempfile.mkdtemp(prefix="communis-test-tool-"))
 
     async with Worker(
         env.client,
         task_queue=TASK_QUEUE,
-        workflows=[RiffTurnWorkflow],
+        workflows=[CommunisTurnWorkflow],
         activities=[
             tool_call_claude,
             mock_extract_key_insights,
@@ -573,7 +573,7 @@ async def test_turn_with_tool_use_dangerous(env):
             dangerous=True,  # Auto-approve
         )
         result = await env.client.execute_workflow(
-            RiffTurnWorkflow.run,
+            CommunisTurnWorkflow.run,
             config,
             id="test-turn-tool-1",
             task_queue=TASK_QUEUE,
@@ -632,12 +632,12 @@ async def test_turn_with_tool_approval(env):
                 "usage": {"input_tokens": 200, "output_tokens": 50},
             }
 
-    ws = Path(tempfile.mkdtemp(prefix="autoriff-test-approval-"))
+    ws = Path(tempfile.mkdtemp(prefix="communis-test-approval-"))
 
     async with Worker(
         env.client,
         task_queue=TASK_QUEUE,
-        workflows=[RiffTurnWorkflow],
+        workflows=[CommunisTurnWorkflow],
         activities=[
             tool_call_claude,
             mock_extract_key_insights,
@@ -647,7 +647,7 @@ async def test_turn_with_tool_approval(env):
         ],
     ):
         handle = await env.client.start_workflow(
-            RiffTurnWorkflow.run,
+            CommunisTurnWorkflow.run,
             TurnConfig(
                 workspace_dir=str(ws),
                 idea="Approval test",
@@ -663,7 +663,7 @@ async def test_turn_with_tool_approval(env):
 
         # Wait for pending tool
         for _attempt in range(30):
-            pending = await handle.query(RiffTurnWorkflow.get_pending_tool)
+            pending = await handle.query(CommunisTurnWorkflow.get_pending_tool)
             if pending is not None:
                 break
             await asyncio.sleep(0.3)
@@ -672,7 +672,7 @@ async def test_turn_with_tool_approval(env):
         assert pending["command"] == "echo hello"
 
         # Approve the tool call
-        await handle.signal(RiffTurnWorkflow.approve_tool, True)
+        await handle.signal(CommunisTurnWorkflow.approve_tool, True)
 
         result = await handle.result()
 
@@ -728,12 +728,12 @@ async def test_turn_with_tool_denial(env):
                 "usage": {"input_tokens": 100, "output_tokens": 20},
             }
 
-    ws = Path(tempfile.mkdtemp(prefix="autoriff-test-deny-"))
+    ws = Path(tempfile.mkdtemp(prefix="communis-test-deny-"))
 
     async with Worker(
         env.client,
         task_queue=TASK_QUEUE,
-        workflows=[RiffTurnWorkflow],
+        workflows=[CommunisTurnWorkflow],
         activities=[
             denial_call_claude,
             mock_extract_key_insights,
@@ -743,7 +743,7 @@ async def test_turn_with_tool_denial(env):
         ],
     ):
         handle = await env.client.start_workflow(
-            RiffTurnWorkflow.run,
+            CommunisTurnWorkflow.run,
             TurnConfig(
                 workspace_dir=str(ws),
                 idea="Denial test",
@@ -759,7 +759,7 @@ async def test_turn_with_tool_denial(env):
 
         # Wait for pending tool
         for _attempt in range(30):
-            pending = await handle.query(RiffTurnWorkflow.get_pending_tool)
+            pending = await handle.query(CommunisTurnWorkflow.get_pending_tool)
             if pending is not None:
                 break
             await asyncio.sleep(0.3)
@@ -768,7 +768,7 @@ async def test_turn_with_tool_denial(env):
         assert pending["command"] == "rm -rf /"
 
         # Deny the tool call
-        await handle.signal(RiffTurnWorkflow.approve_tool, False)
+        await handle.signal(CommunisTurnWorkflow.approve_tool, False)
 
         result = await handle.result()
 
@@ -784,9 +784,9 @@ async def test_orchestrator_with_dangerous_flag(env):
         workflows=ALL_WORKFLOWS,
         activities=ALL_MOCK_ACTIVITIES,
     ):
-        config = RiffConfig(idea="Dangerous test", max_turns=1, dangerous=True, goal_complete_detection=False)
+        config = CommunisConfig(idea="Dangerous test", max_turns=1, dangerous=True, goal_complete_detection=False)
         result = await env.client.execute_workflow(
-            RiffOrchestratorWorkflow.run,
+            CommunisOrchestratorWorkflow.run,
             config,
             id="test-orch-dangerous",
             task_queue=TASK_QUEUE,
@@ -816,7 +816,7 @@ async def test_orchestrator_goal_complete(env):
                 "reasoning": "All tasks done.",
                 "goal_complete": True,
                 "action": "step",
-                "subagents": [],
+                "subcommunis": [],
                 "plan_summary": "Everything accomplished.",
             }
         return {
@@ -825,7 +825,7 @@ async def test_orchestrator_goal_complete(env):
             "reasoning": "More work needed.",
             "goal_complete": False,
             "action": "step",
-            "subagents": [],
+            "subcommunis": [],
             "plan_summary": "In progress.",
         }
 
@@ -835,7 +835,7 @@ async def test_orchestrator_goal_complete(env):
         goal_complete_planner,
         mock_summarize_artifacts,
         mock_validate_user_feedback,
-        mock_summarize_subagent_results,
+        mock_summarize_subcommunis_results,
         mock_execute_run_command,
         mock_init_workspace,
         mock_write_turn_artifact,
@@ -843,7 +843,7 @@ async def test_orchestrator_goal_complete(env):
         mock_write_workspace_summary,
         mock_collect_older_turns_text,
         mock_write_plan_file,
-        mock_write_subagent_summary,
+        mock_write_subcommunis_summary,
     ]
 
     async with Worker(
@@ -852,9 +852,9 @@ async def test_orchestrator_goal_complete(env):
         workflows=ALL_WORKFLOWS,
         activities=activities,
     ):
-        config = RiffConfig(idea="Goal complete test", max_turns=10, auto=True, goal_complete_detection=True)
+        config = CommunisConfig(idea="Goal complete test", max_turns=10, auto=True, goal_complete_detection=True)
         result = await env.client.execute_workflow(
-            RiffOrchestratorWorkflow.run,
+            CommunisOrchestratorWorkflow.run,
             config,
             id="test-orch-goal-complete",
             task_queue=TASK_QUEUE,
@@ -877,15 +877,15 @@ async def test_orchestrator_indefinite_mode(env):
         activities=ALL_MOCK_ACTIVITIES,
     ):
         handle = await env.client.start_workflow(
-            RiffOrchestratorWorkflow.run,
-            RiffConfig(idea="Indefinite test", max_turns=0, auto=True, goal_complete_detection=False),
+            CommunisOrchestratorWorkflow.run,
+            CommunisConfig(idea="Indefinite test", max_turns=0, auto=True, goal_complete_detection=False),
             id="test-orch-indefinite",
             task_queue=TASK_QUEUE,
         )
 
         # Check that state shows the default max
         for _attempt in range(30):
-            state = await handle.query(RiffOrchestratorWorkflow.get_state)
+            state = await handle.query(CommunisOrchestratorWorkflow.get_state)
             if state["current_turn"] >= 1:
                 break
             await asyncio.sleep(0.3)
@@ -901,11 +901,11 @@ async def test_orchestrator_indefinite_mode(env):
 
 
 @pytest.mark.asyncio
-async def test_orchestrator_spawn_subagents(env):
-    """Test that planner returning action=spawn starts sub-agent workflows."""
-    # The mock planner is shared between parent and sub-agents, so we use a
+async def test_orchestrator_spawn_subcommunis(env):
+    """Test that planner returning action=spawn starts subcommunis workflows."""
+    # The mock planner is shared between parent and subcommuniss, so we use a
     # simple approach: first call spawns, all subsequent calls signal goal_complete.
-    # This way sub-agents complete immediately and the parent finishes after spawn.
+    # This way subcommuniss complete immediately and the parent finishes after spawn.
     call_count = 0
 
     @activity.defn(name="plan_next_turn")
@@ -913,28 +913,28 @@ async def test_orchestrator_spawn_subagents(env):
         nonlocal call_count
         call_count += 1
         if call_count == 1:
-            # Parent's first call: spawn sub-agents
+            # Parent's first call: spawn subcommuniss
             return {
                 "role": "",
                 "instructions": "",
                 "reasoning": "Tasks are independent.",
                 "goal_complete": False,
                 "action": "spawn",
-                "subagents": [
+                "subcommunis": [
                     {"task": "Research topic A", "max_turns": 2},
                     {"task": "Research topic B", "max_turns": 2},
                 ],
                 "plan_summary": "Spawning parallel research.",
             }
         else:
-            # All other calls (sub-agents + parent continuation): goal_complete
+            # All other calls (subcommuniss + parent continuation): goal_complete
             return {
                 "role": "Complete",
                 "instructions": "",
                 "reasoning": "Done.",
                 "goal_complete": True,
                 "action": "step",
-                "subagents": [],
+                "subcommunis": [],
                 "plan_summary": "All done.",
             }
 
@@ -944,7 +944,7 @@ async def test_orchestrator_spawn_subagents(env):
         spawn_planner,
         mock_summarize_artifacts,
         mock_validate_user_feedback,
-        mock_summarize_subagent_results,
+        mock_summarize_subcommunis_results,
         mock_execute_run_command,
         mock_init_workspace,
         mock_write_turn_artifact,
@@ -952,7 +952,7 @@ async def test_orchestrator_spawn_subagents(env):
         mock_write_workspace_summary,
         mock_collect_older_turns_text,
         mock_write_plan_file,
-        mock_write_subagent_summary,
+        mock_write_subcommunis_summary,
     ]
 
     async with Worker(
@@ -961,12 +961,12 @@ async def test_orchestrator_spawn_subagents(env):
         workflows=ALL_WORKFLOWS,
         activities=activities,
     ):
-        config = RiffConfig(
+        config = CommunisConfig(
             idea="Spawn test", max_turns=10, auto=True,
-            goal_complete_detection=True, max_subagents=3,
+            goal_complete_detection=True, max_subcommunis=3,
         )
         result = await env.client.execute_workflow(
-            RiffOrchestratorWorkflow.run,
+            CommunisOrchestratorWorkflow.run,
             config,
             id="test-orch-spawn",
             task_queue=TASK_QUEUE,
@@ -974,19 +974,19 @@ async def test_orchestrator_spawn_subagents(env):
 
     assert result["status"] == "complete"
     assert result["goal_complete"] is True
-    # Planner was called at least 3 times: parent spawn + 2 sub-agent planners + parent continuation
-    assert call_count >= 3  # Parent + sub-agents all called plan_next_turn
+    # Planner was called at least 3 times: parent spawn + 2 subcommunis planners + parent continuation
+    assert call_count >= 3  # Parent + subcommuniss all called plan_next_turn
 
 
 @pytest.mark.asyncio
-async def test_subagent_no_recursion(env):
-    """Test that sub-agents have max_subagents=0 and cannot spawn further sub-agents."""
+async def test_subcommunis_no_recursion(env):
+    """Test that subcommuniss have max_subcommunis=0 and cannot spawn further subcommuniss."""
     spawn_attempted = False
 
     @activity.defn(name="plan_next_turn")
     async def recursive_spawn_planner(context: str, provider: str = "", base_url: str = "", model: str = "") -> dict:
         nonlocal spawn_attempted
-        # If context mentions sub-agent task, try to spawn (should be ignored)
+        # If context mentions subcommunis task, try to spawn (should be ignored)
         if "Sub-task" in context:
             spawn_attempted = True
             return {
@@ -994,32 +994,32 @@ async def test_subagent_no_recursion(env):
                 "instructions": "Do the sub-task.",
                 "reasoning": "Working on sub-task.",
                 "goal_complete": False,
-                "action": "spawn",  # This should be ignored because max_subagents=0
-                "subagents": [
+                "action": "spawn",  # This should be ignored because max_subcommunis=0
+                "subcommunis": [
                     {"task": "Sub-sub-task", "max_turns": 1},
                 ],
-                "plan_summary": "Trying to spawn from sub-agent.",
+                "plan_summary": "Trying to spawn from subcommunis.",
             }
-        # Parent planner spawns sub-agents
+        # Parent planner spawns subcommuniss
         return {
             "role": "",
             "instructions": "",
             "reasoning": "Independent tasks.",
             "goal_complete": False,
             "action": "spawn",
-            "subagents": [
+            "subcommunis": [
                 {"task": "Sub-task 1", "max_turns": 2},
             ],
             "plan_summary": "Spawning.",
         }
 
-    # The sub-agent's planner will return action=spawn but max_subagents=0 should
+    # The subcommunis's planner will return action=spawn but max_subcommunis=0 should
     # cause it to fall through to step handling. Since we return action=spawn with
     # no valid step fields, we need to handle this differently.
-    # Actually, let's just verify the config passed to sub-agents has max_subagents=0
-    # by checking that the sub-agent completes without spawning.
+    # Actually, let's just verify the config passed to subcommuniss has max_subcommunis=0
+    # by checking that the subcommunis completes without spawning.
 
-    # Simpler approach: just verify the spawn_planner for sub-agents gets step treatment
+    # Simpler approach: just verify the spawn_planner for subcommuniss gets step treatment
     call_count = 0
 
     @activity.defn(name="plan_next_turn")
@@ -1035,36 +1035,36 @@ async def test_subagent_no_recursion(env):
                 "reasoning": "Independent tasks.",
                 "goal_complete": False,
                 "action": "spawn",
-                "subagents": [
+                "subcommunis": [
                     {"task": "Sub-task alpha", "max_turns": 2},
                 ],
                 "plan_summary": "Spawning.",
             }
-        # Subsequent calls are sub-agent planner and parent continuation
-        # Sub-agent planner calls (call_count 2, 3):
-        # call 2: sub-agent first step (will try spawn but max_subagents=0)
+        # Subsequent calls are subcommunis planner and parent continuation
+        # Subcommunis planner calls (call_count 2, 3):
+        # call 2: subcommunis first step (will try spawn but max_subcommunis=0)
         if call_count == 2:
             return {
                 "role": "Worker",
                 "instructions": "Do the sub-task.",
                 "reasoning": "Working.",
                 "goal_complete": False,
-                "action": "spawn",  # max_subagents=0 means this falls through to step
-                "subagents": [{"task": "recursion attempt", "max_turns": 1}],
+                "action": "spawn",  # max_subcommunis=0 means this falls through to step
+                "subcommunis": [{"task": "recursion attempt", "max_turns": 1}],
                 "plan_summary": "Attempting recursion.",
             }
         if call_count == 3:
-            # Sub-agent completes
+            # Subcommunis completes
             return {
                 "role": "Complete",
                 "instructions": "",
                 "reasoning": "Sub-task done.",
                 "goal_complete": True,
                 "action": "step",
-                "subagents": [],
+                "subcommunis": [],
                 "plan_summary": "Sub-task complete.",
             }
-        # call 4: parent continues after sub-agents
+        # call 4: parent continues after subcommuniss
         if call_count == 4:
             return {
                 "role": "Complete",
@@ -1072,7 +1072,7 @@ async def test_subagent_no_recursion(env):
                 "reasoning": "All done.",
                 "goal_complete": True,
                 "action": "step",
-                "subagents": [],
+                "subcommunis": [],
                 "plan_summary": "Complete.",
             }
         # Fallback
@@ -1082,7 +1082,7 @@ async def test_subagent_no_recursion(env):
             "reasoning": "Fallback done.",
             "goal_complete": True,
             "action": "step",
-            "subagents": [],
+            "subcommunis": [],
             "plan_summary": "Fallback.",
         }
 
@@ -1092,7 +1092,7 @@ async def test_subagent_no_recursion(env):
         counting_planner,
         mock_summarize_artifacts,
         mock_validate_user_feedback,
-        mock_summarize_subagent_results,
+        mock_summarize_subcommunis_results,
         mock_execute_run_command,
         mock_init_workspace,
         mock_write_turn_artifact,
@@ -1100,7 +1100,7 @@ async def test_subagent_no_recursion(env):
         mock_write_workspace_summary,
         mock_collect_older_turns_text,
         mock_write_plan_file,
-        mock_write_subagent_summary,
+        mock_write_subcommunis_summary,
     ]
 
     async with Worker(
@@ -1109,12 +1109,12 @@ async def test_subagent_no_recursion(env):
         workflows=ALL_WORKFLOWS,
         activities=activities,
     ):
-        config = RiffConfig(
+        config = CommunisConfig(
             idea="No recursion test", max_turns=10, auto=True,
-            goal_complete_detection=True, max_subagents=3,
+            goal_complete_detection=True, max_subcommunis=3,
         )
         result = await env.client.execute_workflow(
-            RiffOrchestratorWorkflow.run,
+            CommunisOrchestratorWorkflow.run,
             config,
             id="test-orch-no-recursion",
             task_queue=TASK_QUEUE,
@@ -1122,6 +1122,6 @@ async def test_subagent_no_recursion(env):
 
     assert result["status"] == "complete"
     assert result["goal_complete"] is True
-    # The sub-agent tried action=spawn but with max_subagents=0 it was treated as a step
-    # Sub-agent did 1 step (the spawn fallthrough), then signaled goal_complete
+    # The subcommunis tried action=spawn but with max_subcommunis=0 it was treated as a step
+    # Subcommunis did 1 step (the spawn fallthrough), then signaled goal_complete
     # Parent: step 1 = spawn, step 2 = goal_complete

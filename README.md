@@ -1,4 +1,4 @@
-# autoRiff
+# communis
 
 A self-directing iterative work loop. Give it a prompt and a turn count — it decomposes the work into steps, assigns a different agent role each turn, builds on its own prior output, and optionally takes human feedback between turns.
 
@@ -31,7 +31,7 @@ uv run python cli/main.py "your prompt here" --turns 3
 3. A **turn agent** with that role produces one round of work, reading prior turns from workspace files.
 4. Between turns, you can steer with feedback or skip.
 5. The final turn synthesizes everything into a deliverable.
-6. All outputs live as markdown files in `.autoriff/<workflow-id>/`.
+6. All outputs live as markdown files in `.communis/<workflow-id>/`.
 
 It doesn't know what it's going to do before it starts. The planner reads what's been produced so far and decides the next move each turn. You can throw anything at it:
 
@@ -79,14 +79,14 @@ uv run python cli/main.py "your prompt" -t 3 -p openai -m qwen/qwen3.5-9b
 ## Architecture
 
 ```
-RiffOrchestratorWorkflow (parent)
+CommunisOrchestratorWorkflow (parent)
   │
-  ├── init_workspace ─── creates .autoriff/<id>/
+  ├── init_workspace ─── creates .communis/<id>/
   │
   ├── for each turn:
   │     ├── read_turn_context ─── reads summary.md + recent turn files
   │     ├── plan_next_turn ────── LLM picks role + instructions
-  │     ├── RiffTurnWorkflow ──── child workflow:
+  │     ├── CommunisTurnWorkflow ──── child workflow:
   │     │     ├── read_turn_context ── read prior work from files
   │     │     ├── call_claude ──────── generate turn output
   │     │     ├── extract_key_insights ─ compact bullet points
@@ -99,7 +99,7 @@ RiffOrchestratorWorkflow (parent)
 
 ### The Two Model Tiers
 
-Not every LLM call needs the same capability. autoRiff splits calls into two tiers:
+Not every LLM call needs the same capability. communis splits calls into two tiers:
 
 | Tier | Used for | Default | Why |
 |------|----------|---------|-----|
@@ -110,11 +110,11 @@ With Claude, Haiku is ~60x cheaper than Sonnet. The utility tasks don't need int
 
 ### Workspace Files
 
-Each session writes to `.autoriff/<workflow-id>/`:
+Each session writes to `.communis/<workflow-id>/`:
 
 ```
-.autoriff/autoriff-a1b2c3d4/
-├── riff.md                    # Session manifest
+.communis/communis-a1b2c3d4/
+├── communis.md                    # Session manifest
 ├── turn-01-explorer.md        # YAML frontmatter + full output
 ├── turn-02-devils-advocate.md
 ├── turn-03-synthesizer.md
@@ -133,11 +133,11 @@ This is a standard Temporal workflow. It can be:
 - **Queried mid-execution** for state from any Temporal client
 
 ```python
-# Example: calling autoRiff from another Temporal workflow
+# Example: calling communis from another Temporal workflow
 result = await workflow.execute_child_workflow(
-    RiffOrchestratorWorkflow.run,
-    RiffConfig(idea="design the API schema", num_turns=4, auto=True),
-    id="sub-riff-api-design",
+    CommunisOrchestratorWorkflow.run,
+    CommunisConfig(idea="design the API schema", num_turns=4, auto=True),
+    id="sub-communis-api-design",
 )
 ```
 
@@ -146,15 +146,15 @@ See [COMPOSABILITY.md](COMPOSABILITY.md) for detailed patterns and working code 
 ## Project Structure
 
 ```
-autoRiff/
-├── models/data_types.py          # RiffConfig, TurnConfig, TurnResult, RiffState
-├── prompts/riff_prompts.py       # All system prompts (see PROMPTS.md)
+communis/
+├── models/data_types.py          # CommunisConfig, TurnConfig, TurnResult, CommunisState
+├── prompts/communis_prompts.py       # All system prompts (see PROMPTS.md)
 ├── activities/
 │   ├── llm_activities.py         # LLM calls — Anthropic + OpenAI backends (5 activities)
 │   └── workspace_activities.py   # Workspace file I/O (6 activities)
 ├── workflows/
-│   ├── riff_orchestrator.py      # Parent workflow — turn loop, feedback, cancellation
-│   └── riff_turn.py              # Child workflow — single turn execution
+│   ├── communis_orchestrator.py      # Parent workflow — turn loop, feedback, cancellation
+│   └── communis_turn.py              # Child workflow — single turn execution
 ├── cli/main.py                   # CLI with signal handling, Rich output
 ├── scripts/run_worker.py         # Temporal worker registration
 ├── examples/                     # Runnable composability examples
@@ -163,7 +163,7 @@ autoRiff/
 │   ├── external_client.py        # Start/monitor from any Python service
 │   └── api_server.py             # FastAPI REST wrapper
 ├── tests/                        # 32 unit tests (offline) + 7 integration tests (real LLM)
-├── COMPOSABILITY.md              # Patterns for using autoRiff as a building block
+├── COMPOSABILITY.md              # Patterns for using communis as a building block
 ├── PROMPTS.md                    # All prompts extracted for reference
 └── CLAUDE.md                     # AI agent development instructions
 ```
@@ -181,7 +181,7 @@ autoRiff/
 | `FAST_MAX_TOKENS` | *(unset)* | Override token budget for fast calls (set to `4096` for thinking models) |
 | `MAX_OUTPUT_TOKENS` | `16384` | Max tokens per turn output |
 | `TEMPORAL_ADDRESS` | `localhost:7233` | Temporal server |
-| `AUTORIFF_WORKSPACE` | `.autoriff` | Base directory for workspace files |
+| `COMMUNIS_WORKSPACE` | `.communis` | Base directory for workspace files |
 
 ### Using Local Models (LM Studio, Ollama, etc.)
 
@@ -203,7 +203,7 @@ Common endpoints:
 - **Ollama**: `http://localhost:11434/v1`
 - **vLLM**: `http://localhost:8000/v1`
 
-**Thinking models** (Qwen3, DeepSeek-R1, etc.) generate `<think>...</think>` reasoning tokens that consume the max_tokens budget before producing output. autoRiff automatically strips these from responses. Set `FAST_MAX_TOKENS=4096` to give the utility calls enough headroom for reasoning + output.
+**Thinking models** (Qwen3, DeepSeek-R1, etc.) generate `<think>...</think>` reasoning tokens that consume the max_tokens budget before producing output. communis automatically strips these from responses. Set `FAST_MAX_TOKENS=4096` to give the utility calls enough headroom for reasoning + output.
 
 ## Tests
 

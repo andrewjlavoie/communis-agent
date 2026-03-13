@@ -1,5 +1,5 @@
 [project]
-name = "autoriff"
+name = "communis"
 version = "0.1.0"
 description = "Temporal AI Agent for Iterative Idea Development"
 requires-python = ">=3.11"

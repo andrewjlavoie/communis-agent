@@ -11,7 +11,7 @@ with workflow.unsafe.imports_passed_through():
     from activities.tool_activities import execute_run_command
     from activities.workspace_activities import read_turn_context, write_turn_artifact
     from models.data_types import TurnConfig, TurnResult
-    from prompts.riff_prompts import TURN_AGENT_PROMPT_WITH_TOOLS
+    from prompts.communis_prompts import TURN_AGENT_PROMPT_WITH_TOOLS
     from tools.run_tool import RUN_TOOL_DEFINITION
 
 LLM_RETRY_POLICY = RetryPolicy(
@@ -81,7 +81,7 @@ def _extract_tool_uses(content_blocks: list[dict]) -> list[dict]:
 
 
 @workflow.defn
-class RiffTurnWorkflow:
+class CommunisTurnWorkflow:
     """Child workflow: executes a single riff turn with a dynamically assigned role.
 
     When tools are available, runs an agent loop: LLM call -> tool execution -> repeat.

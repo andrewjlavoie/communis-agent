@@ -1,4 +1,4 @@
-"""Example: Start and monitor an autoRiff session from outside Temporal.
+"""Example: Start and monitor a communis session from outside Temporal.
 
 This is a plain Python script — not a workflow. It uses the Temporal client
 SDK to start a workflow, poll its state, and read the result. Use this pattern
@@ -18,10 +18,10 @@ import sys
 
 from temporalio.client import Client
 
-from models.data_types import RiffConfig
-from workflows.riff_orchestrator import RiffOrchestratorWorkflow
+from models.data_types import CommunisConfig
+from workflows.communis_orchestrator import CommunisOrchestratorWorkflow
 
-TASK_QUEUE = "autoriff-task-queue"
+TASK_QUEUE = "communis-task-queue"
 
 
 async def main():
@@ -31,8 +31,8 @@ async def main():
 
     # Start the workflow
     handle = await client.start_workflow(
-        RiffOrchestratorWorkflow.run,
-        RiffConfig(idea=idea, num_turns=3, auto=True),
+        CommunisOrchestratorWorkflow.run,
+        CommunisConfig(idea=idea, num_turns=3, auto=True),
         id="external-client-example",
         task_queue=TASK_QUEUE,
     )
@@ -41,7 +41,7 @@ async def main():
     # Poll for progress
     while True:
         try:
-            state = await handle.query(RiffOrchestratorWorkflow.get_state)
+            state = await handle.query(CommunisOrchestratorWorkflow.get_state)
         except Exception:
             break
 

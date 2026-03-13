@@ -185,7 +185,7 @@ async def test_validate_feedback_irrelevant():
 @pytest.mark.asyncio
 @pytest.mark.timeout(300)  # 5 minute ceiling for 3 LLM-powered turns
 async def test_full_3_turn_workflow():
-    """Run a complete 3-turn autoRiff session against LM Studio via Temporal.
+    """Run a complete 3-turn communis session against LM Studio via Temporal.
 
     This exercises the entire pipeline end-to-end:
       planner → turn agent → insight extractor → (repeat x3) → final result
@@ -208,15 +208,15 @@ async def test_full_3_turn_workflow():
         write_turn_artifact,
         write_workspace_summary,
     )
-    from models.data_types import RiffConfig
-    from workflows.riff_orchestrator import RiffOrchestratorWorkflow
-    from workflows.riff_turn import RiffTurnWorkflow
+    from models.data_types import CommunisConfig
+    from workflows.communis_orchestrator import CommunisOrchestratorWorkflow
+    from workflows.communis_turn import CommunisTurnWorkflow
 
     async with await WorkflowEnvironment.start_local() as env:
         async with Worker(
             env.client,
             task_queue="integration-test-queue",
-            workflows=[RiffOrchestratorWorkflow, RiffTurnWorkflow],
+            workflows=[CommunisOrchestratorWorkflow, CommunisTurnWorkflow],
             activities=[
                 call_claude,
                 plan_next_turn,
@@ -231,7 +231,7 @@ async def test_full_3_turn_workflow():
                 collect_older_turns_text,
             ],
         ):
-            config = RiffConfig(
+            config = CommunisConfig(
                 idea="Design a simple CLI calculator in Python that supports add, subtract, multiply, divide",
                 num_turns=3,
                 model=LM_STUDIO_MODEL,
@@ -239,7 +239,7 @@ async def test_full_3_turn_workflow():
             )
 
             handle = await env.client.start_workflow(
-                RiffOrchestratorWorkflow.run,
+                CommunisOrchestratorWorkflow.run,
                 config,
                 id="integration-test-3turn",
                 task_queue="integration-test-queue",

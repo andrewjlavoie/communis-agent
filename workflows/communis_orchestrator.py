@@ -11,7 +11,7 @@ with workflow.unsafe.imports_passed_through():
     from activities.llm_activities import (
         plan_next_turn,
         summarize_artifacts,
-        summarize_subagent_results,
+        summarize_subcommunis_results,
         validate_user_feedback,
     )
     from activities.workspace_activities import (
@@ -19,22 +19,22 @@ with workflow.unsafe.imports_passed_through():
         init_workspace,
         read_turn_context,
         write_plan_file,
-        write_subagent_summary,
+        write_subcommunis_summary,
         write_workspace_summary,
     )
     from models.data_types import (
         DEFAULT_MAX_TURNS,
-        RiffConfig,
-        RiffState,
-        SubAgentResult,
+        CommunisConfig,
+        CommunisState,
+        SubCommunisResult,
         TurnConfig,
         TurnResult,
     )
-    from prompts.riff_prompts import (
+    from prompts.communis_prompts import (
         APPROACHING_LIMIT_ADDENDUM,
         FINAL_TURN_PLANNER_ADDENDUM,
     )
-    from workflows.riff_turn import RiffTurnWorkflow
+    from workflows.communis_turn import CommunisTurnWorkflow
 
 LLM_RETRY_POLICY = RetryPolicy(
     initial_interval=timedelta(seconds=1),
@@ -53,11 +53,11 @@ MAX_RECENT_ARTIFACTS = 3
 
 
 @workflow.defn
-class RiffOrchestratorWorkflow:
+class CommunisOrchestratorWorkflow:
     """Parent workflow: orchestrates iterative turns toward goal completion."""
 
     def __init__(self):
-        self.state = RiffState()
+        self.state = CommunisState()
         self.user_feedback: str | None = None
         self.feedback_skipped: bool = False
         self.feedback_event = asyncio.Event()
@@ -106,7 +106,7 @@ class RiffOrchestratorWorkflow:
 
     # --- Main workflow ---
     @workflow.run
-    async def run(self, config: RiffConfig) -> dict:
+    async def run(self, config: CommunisConfig) -> dict:
         self.state.idea = config.idea
         effective_max = config.max_turns if config.max_turns > 0 else DEFAULT_MAX_TURNS
         self.state.max_turns = effective_max
@@ -134,7 +134,7 @@ class RiffOrchestratorWorkflow:
 
         return self.state.to_dict()
 
-    async def _run_turns(self, config: RiffConfig, effective_max: int) -> None:
+    async def _run_turns(self, config: CommunisConfig, effective_max: int) -> None:
         """Execute the turn loop. Raises CancelledError if workflow is cancelled."""
         # Initialize workspace
         workspace_dir = await workflow.execute_activity(
@@ -189,40 +189,40 @@ class RiffOrchestratorWorkflow:
             action = plan.get("action", "step")
 
             # --- Handle spawn action ---
-            if action == "spawn" and config.max_subagents > 0:
-                subagent_tasks = plan.get("subagents", [])
-                if subagent_tasks:
-                    self.state.current_role = "Spawning sub-agents"
+            if action == "spawn" and config.max_subcommunis > 0:
+                subcommunis_tasks = plan.get("subcommunis", [])
+                if subcommunis_tasks:
+                    self.state.current_role = "Spawning subcommuniss"
                     self.state.latest_message = (
-                        f"Step {turn_number}: Spawning {len(subagent_tasks)} sub-agents "
+                        f"Step {turn_number}: Spawning {len(subcommunis_tasks)} subcommuniss "
                         f"— {plan.get('reasoning', '')}"
                     )
 
-                    subagent_results = await self._spawn_subagents(
-                        subagent_tasks, config, workspace_dir, turn_number
+                    subcommunis_results = await self._spawn_subcommunis(
+                        subcommunis_tasks, config, workspace_dir, turn_number
                     )
 
-                    # Summarize sub-agent results
+                    # Summarize subcommunis results
                     results_text = "\n\n".join(
                         f"Task: {r.task}\nStatus: {r.status}\nSummary: {r.summary}"
-                        for r in subagent_results
+                        for r in subcommunis_results
                     )
                     summary = await workflow.execute_activity(
-                        summarize_subagent_results,
+                        summarize_subcommunis_results,
                         args=[results_text, config.idea, config.provider, config.base_url, config.model],
                         start_to_close_timeout=FAST_LLM_TIMEOUT,
                         retry_policy=LLM_RETRY_POLICY,
                     )
 
-                    # Write sub-agent summary to workspace
+                    # Write subcommunis summary to workspace
                     await workflow.execute_activity(
-                        write_subagent_summary,
+                        write_subcommunis_summary,
                         args=[workspace_dir, turn_number, summary],
                         start_to_close_timeout=IO_TIMEOUT,
                     )
 
                     self.state.latest_message = (
-                        f"Step {turn_number}: Sub-agents complete."
+                        f"Step {turn_number}: Subcommuniss complete."
                     )
                     continue
 
@@ -252,7 +252,7 @@ class RiffOrchestratorWorkflow:
 
             # Execute child workflow
             result: TurnResult = await workflow.execute_child_workflow(
-                RiffTurnWorkflow.run,
+                CommunisTurnWorkflow.run,
                 turn_config,
                 id=f"{workflow.info().workflow_id}-turn-{turn_number}",
             )
@@ -316,42 +316,42 @@ class RiffOrchestratorWorkflow:
 
                 self.state.status = "running"
 
-    async def _spawn_subagents(
+    async def _spawn_subcommunis(
         self,
-        subagent_tasks: list[dict],
-        config: RiffConfig,
+        subcommunis_tasks: list[dict],
+        config: CommunisConfig,
         workspace_dir: str,
         turn_number: int,
-    ) -> list[SubAgentResult]:
-        """Spawn sub-agent orchestrator workflows in parallel and collect results."""
-        # Cap at max_subagents
-        tasks = subagent_tasks[: config.max_subagents]
+    ) -> list[SubCommunisResult]:
+        """Spawn subcommunis orchestrator workflows in parallel and collect results."""
+        # Cap at max_subcommunis
+        tasks = subcommunis_tasks[: config.max_subcommunis]
 
         parent_id = workflow.info().workflow_id
 
         handles = []
         for i, task_def in enumerate(tasks):
-            sub_id = f"{parent_id}-subagent-{turn_number}-{i}"
-            sub_config = RiffConfig(
+            sub_id = f"{parent_id}-subcommunis-{turn_number}-{i}"
+            sub_config = CommunisConfig(
                 idea=task_def.get("task", ""),
                 max_turns=task_def.get("max_turns", 5),
                 model=config.model,
-                auto=True,  # Sub-agents don't prompt for feedback
+                auto=True,  # Subcommuniss don't prompt for feedback
                 provider=config.provider,
                 base_url=config.base_url,
                 dangerous=config.dangerous,
                 goal_complete_detection=True,
-                max_subagents=0,  # Prevent recursion bomb
+                max_subcommunis=0,  # Prevent recursion bomb
             )
             handle = await workflow.start_child_workflow(
-                RiffOrchestratorWorkflow.run,
+                CommunisOrchestratorWorkflow.run,
                 sub_config,
                 id=sub_id,
             )
             handles.append((task_def, handle))
 
-        # Wait for all sub-agents to complete
-        results: list[SubAgentResult] = []
+        # Wait for all subcommuniss to complete
+        results: list[SubCommunisResult] = []
         for task_def, handle in handles:
             try:
                 sub_result = await handle
@@ -366,7 +366,7 @@ class RiffOrchestratorWorkflow:
                         )
                 summary = "\n".join(turn_summaries) if turn_summaries else sub_result.get("latest_message", "")
 
-                results.append(SubAgentResult(
+                results.append(SubCommunisResult(
                     task=task_def.get("task", ""),
                     status=status,
                     summary=summary,
@@ -374,7 +374,7 @@ class RiffOrchestratorWorkflow:
                     workspace_dir=sub_result.get("workspace_dir", ""),
                 ))
             except Exception as e:
-                results.append(SubAgentResult(
+                results.append(SubCommunisResult(
                     task=task_def.get("task", ""),
                     status="error",
                     summary=f"Error: {e}",
@@ -383,7 +383,7 @@ class RiffOrchestratorWorkflow:
         return results
 
     def _build_planner_context(
-        self, config: RiffConfig, ws_context: dict, turn_number: int, effective_max: int
+        self, config: CommunisConfig, ws_context: dict, turn_number: int, effective_max: int
     ) -> str:
         """Build context string for the planner from workspace data."""
         parts = [f"Goal: {config.idea}"]
@@ -418,10 +418,10 @@ class RiffOrchestratorWorkflow:
                 f"Steps completed so far: {len(self.state.turn_results)}."
             )
 
-        # Sub-agent capability
-        if config.max_subagents > 0:
+        # Subcommunis capability
+        if config.max_subcommunis > 0:
             parts.append(
-                f"You can spawn up to {config.max_subagents} sub-agents in parallel "
+                f"You can spawn up to {config.max_subcommunis} subcommuniss in parallel "
                 f"for independent tasks using the 'spawn' action."
             )
 
