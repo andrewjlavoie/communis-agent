@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import timedelta
 
 from temporalio import workflow
-from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
     from activities.llm_activities import call_claude, extract_key_insights
@@ -13,19 +11,13 @@ with workflow.unsafe.imports_passed_through():
     from models.data_types import TurnConfig, TurnResult
     from prompts.communis_prompts import TURN_AGENT_PROMPT_WITH_TOOLS
     from tools.run_tool import RUN_TOOL_DEFINITION
-
-LLM_RETRY_POLICY = RetryPolicy(
-    initial_interval=timedelta(seconds=1),
-    backoff_coefficient=2.0,
-    maximum_interval=timedelta(seconds=30),
-    maximum_attempts=5,
-)
-
-# Timeouts — LLM calls can take minutes for long context; file I/O is fast
-LLM_TIMEOUT = timedelta(minutes=30)
-FAST_LLM_TIMEOUT = timedelta(minutes=10)
-IO_TIMEOUT = timedelta(seconds=30)
-TOOL_TIMEOUT = timedelta(minutes=5)
+    from workflows.constants import (
+        FAST_LLM_TIMEOUT,
+        IO_TIMEOUT,
+        LLM_RETRY_POLICY,
+        LLM_TIMEOUT,
+        TOOL_TIMEOUT,
+    )
 
 # Safety limit on tool call iterations per turn
 MAX_TOOL_ITERATIONS = 20

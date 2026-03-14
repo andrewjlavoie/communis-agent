@@ -41,7 +41,7 @@ class ParallelAnalysisWorkflow:
                 CommunisOrchestratorWorkflow.run,
                 CommunisConfig(
                     idea=f"{angle}: {problem}",
-                    num_turns=3,
+                    max_turns=3,
                     auto=True,
                 ),
                 id=f"{wf_id}-{name}",
@@ -70,7 +70,7 @@ class ParallelAnalysisWorkflow:
                     + "\n\nCreate a unified recommendation that balances all perspectives. "
                     "Identify where they agree, where they conflict, and what to prioritize."
                 ),
-                num_turns=2,
+                max_turns=2,
                 auto=True,
             ),
             id=f"{wf_id}-synthesis",
@@ -99,13 +99,12 @@ async def main():
         collect_older_turns_text, init_workspace, read_turn_context,
         read_turn_file, write_turn_artifact, write_workspace_summary,
     )
+    from shared.constants import TASK_QUEUE
     from workflows.communis_turn import CommunisTurnWorkflow
-
-    task_queue = "communis-task-queue"
 
     async with Worker(
         client,
-        task_queue=task_queue,
+        task_queue=TASK_QUEUE,
         workflows=[ParallelAnalysisWorkflow, CommunisOrchestratorWorkflow, CommunisTurnWorkflow],
         activities=[
             call_claude, plan_next_turn, extract_key_insights,
@@ -118,7 +117,7 @@ async def main():
             ParallelAnalysisWorkflow.run,
             problem,
             id="parallel-analysis-example",
-            task_queue=task_queue,
+            task_queue=TASK_QUEUE,
         )
 
     print(f"\nProblem: {result['problem']}")

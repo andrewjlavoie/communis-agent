@@ -6,6 +6,8 @@ import re
 
 from temporalio import activity
 
+from shared.constants import DEFAULT_MODEL_STRING
+
 from prompts.communis_prompts import (
     EXTRACT_INSIGHTS_PROMPT,
     PLANNER_PROMPT,
@@ -17,7 +19,7 @@ from prompts.communis_prompts import (
 # --- Provider defaults (from env, overridable per-call) ---
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic")  # "anthropic" or "openai"
 
-DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "claude-sonnet-4-5-20250929")
+DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", DEFAULT_MODEL_STRING)
 FAST_MODEL = os.getenv("FAST_MODEL", "claude-haiku-4-5-20251001")
 MAX_OUTPUT_TOKENS = int(os.getenv("MAX_OUTPUT_TOKENS", "16384"))
 
@@ -250,6 +252,24 @@ async def _call_openai(
     }
 
 
+def _parse_llm_json(text: str, default: dict | list) -> dict | list:
+    """Parse JSON from LLM output, with fallback extraction and default."""
+    text = text.strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        bracket = "{" if isinstance(default, dict) else "["
+        close = "}" if isinstance(default, dict) else "]"
+        start = text.find(bracket)
+        end = text.rfind(close) + 1
+        if start >= 0 and end > start:
+            try:
+                return json.loads(text[start:end])
+            except json.JSONDecodeError:
+                return default
+        return default
+
+
 # --- Activities ---
 
 
@@ -288,28 +308,11 @@ async def plan_next_turn(context: str, provider: str = "", base_url: str = "", m
         base_url=base_url,
     )
 
-    text = response["text"].strip()
-
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError:
-        start = text.find("{")
-        end = text.rfind("}") + 1
-        if start >= 0 and end > start:
-            try:
-                parsed = json.loads(text[start:end])
-            except json.JSONDecodeError:
-                parsed = {
-                    "role": "Explorer",
-                    "instructions": "Explore the idea broadly. Identify what it is, what makes it interesting, and what directions it could go.",
-                    "reasoning": "Defaulting to open exploration.",
-                }
-        else:
-            parsed = {
-                "role": "Explorer",
-                "instructions": "Explore the idea broadly. Identify what it is, what makes it interesting, and what directions it could go.",
-                "reasoning": "Defaulting to open exploration.",
-            }
+    parsed = _parse_llm_json(response["text"], {
+        "role": "Explorer",
+        "instructions": "Explore the idea broadly. Identify what it is, what makes it interesting, and what directions it could go.",
+        "reasoning": "Defaulting to open exploration.",
+    })
 
     return {
         "role": parsed.get("role", "Explorer"),
@@ -335,21 +338,9 @@ async def extract_key_insights(content: str, provider: str = "", base_url: str =
     )
 
     text = response["text"].strip()
-
-    try:
-        insights = json.loads(text)
-        if isinstance(insights, list):
-            return [str(i) for i in insights]
-    except json.JSONDecodeError:
-        start = text.find("[")
-        end = text.rfind("]") + 1
-        if start >= 0 and end > start:
-            try:
-                insights = json.loads(text[start:end])
-                return [str(i) for i in insights]
-            except json.JSONDecodeError:
-                pass
-
+    parsed = _parse_llm_json(text, [])
+    if isinstance(parsed, list) and parsed:
+        return [str(i) for i in parsed]
     return [text[:200]] if text else []
 
 
@@ -384,20 +375,7 @@ async def validate_user_feedback(feedback: str, idea: str, provider: str = "", b
         base_url=base_url,
     )
 
-    text = response["text"].strip()
-
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError:
-        start = text.find("{")
-        end = text.rfind("}") + 1
-        if start >= 0 and end > start:
-            try:
-                parsed = json.loads(text[start:end])
-            except json.JSONDecodeError:
-                parsed = {"relevant": True, "reason": "Could not validate, accepting feedback."}
-        else:
-            parsed = {"relevant": True, "reason": "Could not validate, accepting feedback."}
+    parsed = _parse_llm_json(response["text"], {"relevant": True, "reason": "Could not validate, accepting feedback."})
 
     return {"relevant": parsed.get("relevant", True), "reason": parsed.get("reason", "")}
 

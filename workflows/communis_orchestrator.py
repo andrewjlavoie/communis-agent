@@ -4,7 +4,6 @@ import asyncio
 from datetime import timedelta
 
 from temporalio import workflow
-from temporalio.common import RetryPolicy
 from temporalio.exceptions import is_cancelled_exception
 
 with workflow.unsafe.imports_passed_through():
@@ -35,18 +34,11 @@ with workflow.unsafe.imports_passed_through():
         FINAL_TURN_PLANNER_ADDENDUM,
     )
     from workflows.communis_turn import CommunisTurnWorkflow
-
-LLM_RETRY_POLICY = RetryPolicy(
-    initial_interval=timedelta(seconds=1),
-    backoff_coefficient=2.0,
-    maximum_interval=timedelta(seconds=30),
-    maximum_attempts=5,
-)
-
-# Timeouts — LLM calls can take minutes for long context; file I/O is fast
-LLM_TIMEOUT = timedelta(minutes=30)
-FAST_LLM_TIMEOUT = timedelta(minutes=10)
-IO_TIMEOUT = timedelta(seconds=30)
+    from workflows.constants import (
+        FAST_LLM_TIMEOUT,
+        IO_TIMEOUT,
+        LLM_RETRY_POLICY,
+    )
 
 # Summarize older turns once we have more than this many
 MAX_RECENT_ARTIFACTS = 3
@@ -82,27 +74,12 @@ class CommunisOrchestratorWorkflow:
     def get_turn_result(self, turn_number: int) -> dict | None:
         for r in self.state.turn_results:
             if r.turn_number == turn_number:
-                return {
-                    "turn_number": r.turn_number,
-                    "role": r.role,
-                    "key_insights": r.key_insights,
-                    "token_usage": r.token_usage,
-                    "artifact_path": r.artifact_path,
-                }
+                return r.to_dict()
         return None
 
     @workflow.query
     def get_all_results(self) -> list[dict]:
-        return [
-            {
-                "turn_number": r.turn_number,
-                "role": r.role,
-                "key_insights": r.key_insights,
-                "token_usage": r.token_usage,
-                "artifact_path": r.artifact_path,
-            }
-            for r in self.state.turn_results
-        ]
+        return [r.to_dict() for r in self.state.turn_results]
 
     # --- Main workflow ---
     @workflow.run
@@ -425,16 +402,17 @@ class CommunisOrchestratorWorkflow:
                 f"for independent tasks using the 'spawn' action."
             )
 
-        # Approaching limit warning
-        remaining = effective_max - turn_number
-        if remaining <= 2 and remaining > 0:
-            parts.append(
-                APPROACHING_LIMIT_ADDENDUM.format(
-                    turn=turn_number,
-                    total=effective_max,
-                    remaining=remaining,
+        # Approaching limit warning (only in fixed-turn mode)
+        if config.max_turns > 0:
+            remaining = effective_max - turn_number
+            if remaining <= 2 and remaining > 0:
+                parts.append(
+                    APPROACHING_LIMIT_ADDENDUM.format(
+                        turn=turn_number,
+                        total=effective_max,
+                        remaining=remaining,
+                    )
                 )
-            )
 
         # Final turn
         if turn_number == effective_max:

@@ -6,6 +6,8 @@ from pathlib import Path
 import yaml
 from temporalio import activity
 
+from shared.frontmatter import parse_frontmatter
+
 WORKSPACE_BASE = os.getenv("COMMUNIS_WORKSPACE", ".communis")
 
 # How many recent turn files to include as full content in context
@@ -23,21 +25,7 @@ def _turn_filename(turn_number: int, role: str) -> str:
 
 def _parse_turn_file(text: str) -> dict:
     """Parse a turn markdown file with YAML frontmatter."""
-    if not text.startswith("---"):
-        return {"meta": {}, "content": text}
-
-    end = text.find("\n---\n", 3)
-    if end == -1:
-        return {"meta": {}, "content": text}
-
-    frontmatter = text[4:end]
-    content = text[end + 5:]
-
-    try:
-        meta = yaml.safe_load(frontmatter) or {}
-    except yaml.YAMLError:
-        meta = {}
-
+    meta, content = parse_frontmatter(text)
     return {"meta": meta, "content": content}
 
 
@@ -123,20 +111,19 @@ async def read_turn_context(workspace_dir: str, current_turn: int) -> dict:
     plan = plan_path.read_text() if plan_path.exists() else ""
 
     # Find and read recent turn files (the ones before current_turn)
-    turn_files: list[tuple[int, Path]] = []
+    turn_files: list[tuple[int, dict]] = []
     for path in sorted(ws.glob("turn-*.md")):
         parsed = _parse_turn_file(path.read_text())
         meta = parsed["meta"]
         tn = meta.get("turn", 0)
         if isinstance(tn, int) and tn < current_turn:
-            turn_files.append((tn, path))
+            turn_files.append((tn, parsed))
 
     # Take last N
-    recent_paths = turn_files[-MAX_RECENT_FILES:]
+    recent_entries = turn_files[-MAX_RECENT_FILES:]
 
     recent_turns = []
-    for _, path in recent_paths:
-        parsed = _parse_turn_file(path.read_text())
+    for _, parsed in recent_entries:
         meta = parsed["meta"]
         recent_turns.append({
             "turn": meta.get("turn", 0),

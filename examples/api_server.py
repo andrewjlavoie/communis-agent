@@ -13,7 +13,7 @@ Usage:
     # Start a session:
     curl -X POST http://localhost:8000/communis \
       -H "Content-Type: application/json" \
-      -d '{"idea": "design an onboarding flow", "num_turns": 3}'
+      -d '{"idea": "design an onboarding flow", "max_turns": 3}'
 
     # Check status:
     curl http://localhost:8000/communis/<workflow_id>
@@ -33,17 +33,16 @@ from pydantic import BaseModel
 from temporalio.client import Client
 
 from models.data_types import CommunisConfig
+from shared.constants import TASK_QUEUE
 from workflows.communis_orchestrator import CommunisOrchestratorWorkflow
 
 app = FastAPI(title="communis API", description="Self-directing iterative work loop as a service")
 temporal: Client | None = None
 
-TASK_QUEUE = "communis-task-queue"
-
 
 class StartRequest(BaseModel):
     idea: str
-    num_turns: int = 3
+    max_turns: int = 3
     model: str = ""
     auto: bool = True
     provider: str = ""
@@ -68,8 +67,8 @@ async def start_communis(req: StartRequest):
         CommunisOrchestratorWorkflow.run,
         CommunisConfig(
             idea=req.idea,
-            num_turns=req.num_turns,
-            model=req.model or "claude-sonnet-4-5-20250929",
+            max_turns=req.max_turns,
+            model=req.model,
             auto=req.auto,
             provider=req.provider,
             base_url=req.base_url,

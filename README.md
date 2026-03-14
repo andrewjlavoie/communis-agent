@@ -55,13 +55,16 @@ uv run python cli/main.py "what would a city look like if it was designed for 15
 uv run python cli/main.py <prompt> [options]
 
 Options:
-  --turns, -t       Number of turns (default: 3, max: 10)
+  --turns, -t       Max steps (0 = indefinite with goal detection, default: 0)
   --model, -m       Model name (default: claude-sonnet-4-5-20250929)
   --provider, -p    LLM provider: 'anthropic' or 'openai' (overrides env var)
   --base-url        Base URL for OpenAI-compatible API (overrides env var)
   --auto, -a        Skip feedback prompts, run straight through
   --output, -o      Save session output to a markdown file
   --verbose, -v     Timing, file paths, token breakdown table
+  --dangerous       Auto-approve all tool calls (no human confirmation)
+  --no-goal-detect  Disable goal completion detection (requires --turns > 0)
+  --max-subcommunis Max parallel subcommunis (0-5, default: 3)
 ```
 
 You can keep both providers configured in `.env` and switch at runtime:
@@ -83,12 +86,14 @@ CommunisOrchestratorWorkflow (parent)
   │
   ├── init_workspace ─── creates .communis/<id>/
   │
-  ├── for each turn:
-  │     ├── read_turn_context ─── reads summary.md + recent turn files
-  │     ├── plan_next_turn ────── LLM picks role + instructions
+  ├── while not complete:
+  │     ├── read_turn_context ─── reads summary.md + plan.md + recent turn files
+  │     ├── plan_next_turn ────── LLM picks role + instructions (or goal_complete/spawn)
+  │     ├── write_plan_file ───── persist rolling plan summary
   │     ├── CommunisTurnWorkflow ──── child workflow:
   │     │     ├── read_turn_context ── read prior work from files
-  │     │     ├── call_claude ──────── generate turn output
+  │     │     ├── call_claude ──────── generate turn output (with tool use loop)
+  │     │     │     └── [run tool] ─── execute shell commands (with approval)
   │     │     ├── extract_key_insights ─ compact bullet points
   │     │     └── write_turn_artifact ── save to turn-NN-role.md
   │     ├── summarize_artifacts ── compress older turns → summary.md
@@ -115,9 +120,13 @@ Each session writes to `.communis/<workflow-id>/`:
 ```
 .communis/communis-a1b2c3d4/
 ├── communis.md                    # Session manifest
+├── plan.md                        # Rolling plan summary
 ├── turn-01-explorer.md        # YAML frontmatter + full output
 ├── turn-02-devils-advocate.md
 ├── turn-03-synthesizer.md
+├── subcommunis-step-03.md     # Subcommunis results summary
+├── subcommunis/               # Subcommunis workspaces
+│   └── <id>-subcommunis-3-0/
 └── summary.md                 # Rolling summary of older turns
 ```
 
@@ -136,7 +145,7 @@ This is a standard Temporal workflow. It can be:
 # Example: calling communis from another Temporal workflow
 result = await workflow.execute_child_workflow(
     CommunisOrchestratorWorkflow.run,
-    CommunisConfig(idea="design the API schema", num_turns=4, auto=True),
+    CommunisConfig(idea="design the API schema", max_turns=4, auto=True),
     id="sub-communis-api-design",
 )
 ```
@@ -150,8 +159,11 @@ communis/
 ├── models/data_types.py          # CommunisConfig, TurnConfig, TurnResult, CommunisState
 ├── prompts/communis_prompts.py       # All system prompts (see PROMPTS.md)
 ├── activities/
-│   ├── llm_activities.py         # LLM calls — Anthropic + OpenAI backends (5 activities)
-│   └── workspace_activities.py   # Workspace file I/O (6 activities)
+│   ├── llm_activities.py         # LLM calls — Anthropic + OpenAI backends (6 activities)
+│   ├── tool_activities.py        # Shell command execution (1 activity)
+│   └── workspace_activities.py   # Workspace file I/O (8 activities)
+├── tools/
+│   └── run_tool.py               # Unix-style run(command="...") tool
 ├── workflows/
 │   ├── communis_orchestrator.py      # Parent workflow — turn loop, feedback, cancellation
 │   └── communis_turn.py              # Child workflow — single turn execution
@@ -162,7 +174,7 @@ communis/
 │   ├── parallel_analysis.py      # Concurrent multi-perspective analysis
 │   ├── external_client.py        # Start/monitor from any Python service
 │   └── api_server.py             # FastAPI REST wrapper
-├── tests/                        # 32 unit tests (offline) + 7 integration tests (real LLM)
+├── tests/                        # 65 tests (offline) + 7 integration tests (real LLM)
 ├── COMPOSABILITY.md              # Patterns for using communis as a building block
 ├── PROMPTS.md                    # All prompts extracted for reference
 └── CLAUDE.md                     # AI agent development instructions
@@ -208,7 +220,7 @@ Common endpoints:
 ## Tests
 
 ```bash
-uv run pytest tests/ -v                                              # 32 unit tests, all offline
+uv run pytest tests/ -v                                              # 65 tests, all offline
 uv run pytest tests/test_integration_lmstudio.py -v -s               # 7 integration tests, real LLM
 uv run pytest tests/ --ignore=tests/test_integration_lmstudio.py -v  # unit tests only
 ```

@@ -42,7 +42,7 @@ class ResearchPipelineWorkflow:
             CommunisOrchestratorWorkflow.run,
             CommunisConfig(
                 idea=f"Research and explore: {topic}",
-                num_turns=3,
+                max_turns=3,
                 auto=True,
             ),
             id=f"{wf_id}-explore",
@@ -64,7 +64,7 @@ class ResearchPipelineWorkflow:
                     + "\n".join(f"- {i}" for i in explore_insights)
                     + "\n\nGo deeper. Challenge assumptions. Find what was missed."
                 ),
-                num_turns=4,
+                max_turns=4,
                 auto=True,
             ),
             id=f"{wf_id}-deep-dive",
@@ -88,7 +88,7 @@ class ResearchPipelineWorkflow:
                     + "\n".join(f"- {i}" for i in deep_insights)
                     + "\n\nSynthesize into a polished, actionable report."
                 ),
-                num_turns=3,
+                max_turns=3,
                 auto=True,
             ),
             id=f"{wf_id}-report",
@@ -134,13 +134,12 @@ async def main():
         write_turn_artifact,
         write_workspace_summary,
     )
+    from shared.constants import TASK_QUEUE
     from workflows.communis_turn import CommunisTurnWorkflow
-
-    task_queue = "communis-task-queue"
 
     async with Worker(
         client,
-        task_queue=task_queue,
+        task_queue=TASK_QUEUE,
         workflows=[ResearchPipelineWorkflow, CommunisOrchestratorWorkflow, CommunisTurnWorkflow],
         activities=[
             call_claude, plan_next_turn, extract_key_insights,
@@ -153,7 +152,7 @@ async def main():
             ResearchPipelineWorkflow.run,
             topic,
             id=f"research-pipeline-example",
-            task_queue=task_queue,
+            task_queue=TASK_QUEUE,
         )
 
     print(f"\nTopic: {result['topic']}")

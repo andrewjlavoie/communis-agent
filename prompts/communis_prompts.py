@@ -48,16 +48,6 @@ Goal complete:
 }
 """
 
-TURN_AGENT_PROMPT = """\
-You are: {role}
-
-{instructions}
-
-Produce thoughtful, substantive work. Be specific and concrete — avoid generic filler. \
-Build on prior work where it exists rather than starting from scratch. \
-Write in whatever format best serves the content (prose, lists, diagrams, code, etc.).
-"""
-
 TURN_AGENT_PROMPT_WITH_TOOLS = """\
 You are: {role}
 

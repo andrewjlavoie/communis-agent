@@ -14,6 +14,7 @@ import asyncio
 import os
 import tempfile
 import time
+import uuid
 from dataclasses import dataclass
 
 # --- Tool definition (Claude tool use JSON schema) ---
@@ -52,9 +53,6 @@ MAX_OUTPUT_LINES = 200
 MAX_OUTPUT_BYTES = 50 * 1024  # 50KB
 BINARY_CONTROL_RATIO = 0.10  # >10% control chars = binary
 OVERFLOW_DIR = os.path.join(tempfile.gettempdir(), "communis-cmd-output")
-
-# Track overflow file counter per-process
-_overflow_counter = 0
 
 
 @dataclass
@@ -172,10 +170,9 @@ def _format_duration(ms: int) -> str:
 
 def _save_overflow(full_output: str) -> str:
     """Save full output to temp file and return the path."""
-    global _overflow_counter
     os.makedirs(OVERFLOW_DIR, exist_ok=True)
-    _overflow_counter += 1
-    path = os.path.join(OVERFLOW_DIR, f"cmd-{_overflow_counter}.txt")
+    tag = uuid.uuid4().hex[:8]
+    path = os.path.join(OVERFLOW_DIR, f"cmd-{tag}.txt")
     with open(path, "w") as f:
         f.write(full_output)
     return path
@@ -227,14 +224,10 @@ def present_output(result: CommandResult) -> str:
         parts.append(f"Explore: cat {overflow_path} | grep <pattern>")
         parts.append(f"         cat {overflow_path} | tail 100")
 
-    # Stderr attachment (always include on failure, include on success if non-empty)
+    # Stderr attachment (always include if non-empty)
     stderr = result.stderr.strip()
     if stderr:
-        if result.exit_code != 0:
-            parts.append(f"[stderr] {stderr}")
-        else:
-            # On success, only attach stderr if it has content (warnings, etc.)
-            parts.append(f"[stderr] {stderr}")
+        parts.append(f"[stderr] {stderr}")
 
     # Timeout notice
     if result.timed_out:

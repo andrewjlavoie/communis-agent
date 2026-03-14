@@ -9,7 +9,6 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-import yaml
 from dotenv import load_dotenv
 from rich.console import Console
 from rich.markdown import Markdown
@@ -18,10 +17,10 @@ from rich.table import Table
 from temporalio.client import Client, WorkflowHandle
 
 from models.data_types import DEFAULT_MAX_TURNS, CommunisConfig
+from shared.constants import DEFAULT_MODEL_STRING, TASK_QUEUE
+from shared.frontmatter import parse_frontmatter
 from workflows.communis_orchestrator import CommunisOrchestratorWorkflow
 from workflows.communis_turn import CommunisTurnWorkflow
-
-TASK_QUEUE = "communis-task-queue"
 POLL_INTERVAL = 1.5
 
 console = Console()
@@ -36,22 +35,7 @@ def _read_turn_file(artifact_path: str) -> tuple[str | None, dict]:
     if not path.exists():
         return None, {}
 
-    text = path.read_text()
-    if not text.startswith("---"):
-        return text, {}
-
-    end = text.find("\n---\n", 3)
-    if end == -1:
-        return text, {}
-
-    frontmatter = text[4:end]
-    content = text[end + 5:]
-
-    try:
-        meta = yaml.safe_load(frontmatter) or {}
-    except yaml.YAMLError:
-        meta = {}
-
+    meta, content = parse_frontmatter(path.read_text())
     return content, meta
 
 
@@ -120,7 +104,7 @@ class MarkdownLog:
             f"date: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}\n"
         )
 
-    def add_planner(self, turn: int, max_turns: int, role: str, reasoning: str):
+    def add_planner(self, turn: int, role: str, reasoning: str):
         self.parts.append(f"---\n\n## Step {turn} — {role}\n")
         if reasoning:
             self.parts.append(f"*Planner reasoning: {reasoning}*\n")
@@ -173,7 +157,7 @@ class MarkdownLog:
 
 
 async def run_cli(
-    idea: str, max_turns: int, model: str, auto: bool = False, verbose: bool = False,
+    idea: str, *, max_turns: int, model: str, auto: bool = False, verbose: bool = False,
     provider: str = "", base_url: str = "", output: str = "", dangerous: bool = False,
     goal_complete_detection: bool = True, max_subcommunis: int = 3,
 ):
@@ -354,7 +338,7 @@ async def run_cli(
                         if md_log:
                             turn_num = state.get("current_turn", 0)
                             role = state.get("current_role", "")
-                            md_log.add_planner(turn_num, effective_max, role, parts[1].strip())
+                            md_log.add_planner(turn_num, role, parts[1].strip())
                     else:
                         console.print(f"[cyan]{current_msg}[/cyan]")
 
@@ -589,8 +573,8 @@ def main():
     parser.add_argument(
         "--model",
         "-m",
-        default="claude-sonnet-4-5-20250929",
-        help="Claude model to use (default: claude-sonnet-4-5-20250929)",
+        default=DEFAULT_MODEL_STRING,
+        help=f"Claude model to use (default: {DEFAULT_MODEL_STRING})",
     )
     parser.add_argument(
         "--auto", "-a", action="store_true",
@@ -642,9 +626,17 @@ def main():
     goal_detect = not args.no_goal_detect
 
     asyncio.run(run_cli(
-        args.idea, args.turns, args.model, args.auto, args.verbose,
-        args.provider, args.base_url, args.output, args.dangerous,
-        goal_detect, max_subcommunis,
+        args.idea,
+        max_turns=args.turns,
+        model=args.model,
+        auto=args.auto,
+        verbose=args.verbose,
+        provider=args.provider,
+        base_url=args.base_url,
+        output=args.output,
+        dangerous=args.dangerous,
+        goal_complete_detection=goal_detect,
+        max_subcommunis=max_subcommunis,
     ))
 
 

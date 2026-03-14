@@ -9,12 +9,15 @@ communis is a standard Temporal workflow. Any system that can start a Temporal w
 ```python
 @dataclass
 class CommunisConfig:
-    idea: str              # The prompt / task
-    num_turns: int = 3     # How many iterative turns (1-10)
-    model: str = "..."     # LLM model name
-    auto: bool = False     # True = skip feedback pauses, run straight through
-    provider: str = ""     # "anthropic" or "openai" (empty = env default)
-    base_url: str = ""     # OpenAI-compatible base URL (empty = env default)
+    idea: str                          # The prompt / task
+    max_turns: int = 0                 # How many iterative turns (0 = indefinite)
+    model: str = "..."                 # LLM model name
+    auto: bool = False                 # True = skip feedback pauses, run straight through
+    provider: str = ""                 # "anthropic" or "openai" (empty = env default)
+    base_url: str = ""                 # OpenAI-compatible base URL (empty = env default)
+    dangerous: bool = False            # True = auto-approve all tool calls
+    goal_complete_detection: bool = True  # True = stop early when goal is achieved
+    max_subcommunis: int = 3           # Max parallel subcommunis agents (0 = disabled)
 ```
 
 **Output:** `dict` with this shape
@@ -22,10 +25,11 @@ class CommunisConfig:
 ```python
 {
     "idea": "the original prompt",
-    "num_turns": 3,
+    "max_turns": 3,
     "current_turn": 3,
     "current_role": "Synthesizer",
     "status": "complete",           # "complete" | "cancelled" | "error"
+    "goal_complete": false,
     "workspace_dir": ".communis/communis-a1b2c3d4/",
     "latest_message": "All turns complete!",
     "turn_results": [
@@ -79,7 +83,7 @@ class ResearchPipelineWorkflow:
             CommunisOrchestratorWorkflow.run,
             CommunisConfig(
                 idea=f"Research and explore: {topic}",
-                num_turns=3,
+                max_turns=3,
                 auto=True,
             ),
             id=f"{workflow.info().workflow_id}-explore",
@@ -101,7 +105,7 @@ class ResearchPipelineWorkflow:
                     + "\n\nGo deeper on the most promising findings. "
                     "Challenge assumptions. Find what was missed."
                 ),
-                num_turns=4,
+                max_turns=4,
                 auto=True,
             ),
             id=f"{workflow.info().workflow_id}-deep-dive",
@@ -123,7 +127,7 @@ class ResearchPipelineWorkflow:
                     )
                     + "\n\nSynthesize everything into a polished report."
                 ),
-                num_turns=3,
+                max_turns=3,
                 auto=True,
             ),
             id=f"{workflow.info().workflow_id}-report",
@@ -157,7 +161,7 @@ worker = Worker(
     client,
     task_queue="communis-task-queue",
     workflows=[ResearchPipelineWorkflow, CommunisOrchestratorWorkflow, CommunisTurnWorkflow],
-    activities=[...],  # all 11 activities
+    activities=[...],  # all 15 activities
 )
 ```
 
@@ -182,7 +186,7 @@ class ParallelAnalysisWorkflow:
                 CommunisOrchestratorWorkflow.run,
                 CommunisConfig(
                     idea=f"Analyze from a TECHNICAL perspective: {problem}",
-                    num_turns=3,
+                    max_turns=3,
                     auto=True,
                 ),
                 id=f"{workflow.info().workflow_id}-technical",
@@ -191,7 +195,7 @@ class ParallelAnalysisWorkflow:
                 CommunisOrchestratorWorkflow.run,
                 CommunisConfig(
                     idea=f"Analyze from a BUSINESS perspective: {problem}",
-                    num_turns=3,
+                    max_turns=3,
                     auto=True,
                 ),
                 id=f"{workflow.info().workflow_id}-business",
@@ -200,7 +204,7 @@ class ParallelAnalysisWorkflow:
                 CommunisOrchestratorWorkflow.run,
                 CommunisConfig(
                     idea=f"Analyze from a USER EXPERIENCE perspective: {problem}",
-                    num_turns=3,
+                    max_turns=3,
                     auto=True,
                 ),
                 id=f"{workflow.info().workflow_id}-ux",
@@ -224,7 +228,7 @@ class ParallelAnalysisWorkflow:
                     + "\n".join(f"- {i}" for i in all_insights)
                     + "\n\nCreate a unified recommendation that balances all perspectives."
                 ),
-                num_turns=2,
+                max_turns=2,
                 auto=True,
             ),
             id=f"{workflow.info().workflow_id}-synthesis",
@@ -264,7 +268,7 @@ async def main():
         CommunisOrchestratorWorkflow.run,
         CommunisConfig(
             idea="Design a notification system for a SaaS platform",
-            num_turns=4,
+            max_turns=4,
             auto=True,
         ),
         id="communis-notifications-design",
@@ -276,7 +280,7 @@ async def main():
     # Poll for progress
     while True:
         state = await handle.query(CommunisOrchestratorWorkflow.get_state)
-        print(f"  Turn {state['current_turn']}/{state['num_turns']} — {state['current_role']} — {state['status']}")
+        print(f"  Turn {state['current_turn']}/{state['max_turns']} — {state['current_role']} — {state['status']}")
 
         if state["status"] in ("complete", "cancelled", "error"):
             break
@@ -315,7 +319,7 @@ async def main():
         CommunisOrchestratorWorkflow.run,
         CommunisConfig(
             idea="Plan a company offsite for 50 people",
-            num_turns=4,
+            max_turns=4,
             auto=False,  # Will pause for feedback between turns
         ),
         id="communis-offsite-planning",
@@ -371,7 +375,7 @@ import (
 // CommunisConfig mirrors the Python dataclass — Temporal serializes as JSON
 type CommunisConfig struct {
     Idea     string `json:"idea"`
-    NumTurns int    `json:"num_turns"`
+    MaxTurns int    `json:"max_turns"`
     Model    string `json:"model"`
     Auto     bool   `json:"auto"`
     Provider string `json:"provider"`
@@ -394,7 +398,7 @@ func main() {
         "CommunisOrchestratorWorkflow",  // workflow type name
         CommunisConfig{
             Idea:     "Design a caching strategy for a read-heavy API",
-            NumTurns: 3,
+            MaxTurns: 3,
             Auto:     true,
         },
     )
@@ -423,7 +427,7 @@ import { Client, Connection } from "@temporalio/client";
 
 interface CommunisConfig {
   idea: string;
-  num_turns: number;
+  max_turns: number;
   model?: string;
   auto?: boolean;
   provider?: string;
@@ -438,7 +442,7 @@ async function main() {
     args: [
       {
         idea: "Design a real-time collaboration feature for a document editor",
-        num_turns: 4,
+        max_turns: 4,
         auto: true,
       } satisfies CommunisConfig,
     ],
@@ -472,7 +476,7 @@ temporal workflow start \
   --type CommunisOrchestratorWorkflow \
   --task-queue communis-task-queue \
   --workflow-id "communis-cli-test" \
-  --input '{"idea": "Compare microservices vs monolith for a startup MVP", "num_turns": 3, "auto": true}'
+  --input '{"idea": "Compare microservices vs monolith for a startup MVP", "max_turns": 3, "auto": true}'
 
 # Check status
 temporal workflow query \
@@ -521,7 +525,7 @@ TASK_QUEUE = "communis-task-queue"
 
 class StartRequest(BaseModel):
     idea: str
-    num_turns: int = 3
+    max_turns: int = 3
     model: str = ""
     auto: bool = True
     provider: str = ""
@@ -546,7 +550,7 @@ async def start_communis(req: StartRequest):
         CommunisOrchestratorWorkflow.run,
         CommunisConfig(
             idea=req.idea,
-            num_turns=req.num_turns,
+            max_turns=req.max_turns,
             model=req.model or "claude-sonnet-4-5-20250929",
             auto=req.auto,
             provider=req.provider,
@@ -609,7 +613,7 @@ Then:
 # Start a session
 curl -X POST http://localhost:8000/communis \
   -H "Content-Type: application/json" \
-  -d '{"idea": "Design an onboarding flow for a dev tools product", "num_turns": 3}'
+  -d '{"idea": "Design an onboarding flow for a dev tools product", "max_turns": 3}'
 
 # Check status
 curl http://localhost:8000/communis/communis-a1b2c3d4

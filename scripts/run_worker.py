@@ -24,10 +24,9 @@ from activities.workspace_activities import (
     write_turn_artifact,
     write_workspace_summary,
 )
+from shared.constants import TASK_QUEUE
 from workflows.communis_orchestrator import CommunisOrchestratorWorkflow
 from workflows.communis_turn import CommunisTurnWorkflow
-
-TASK_QUEUE = "communis-task-queue"
 
 
 async def main():

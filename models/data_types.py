@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from shared.constants import DEFAULT_MODEL_STRING
+
 DEFAULT_MAX_TURNS = 50
 
 
@@ -11,7 +13,7 @@ class CommunisConfig:
 
     idea: str
     max_turns: int = 0  # 0 = indefinite (capped by DEFAULT_MAX_TURNS)
-    model: str = "claude-sonnet-4-5-20250929"
+    model: str = DEFAULT_MODEL_STRING
     auto: bool = False  # Skip all feedback prompts
     provider: str = ""  # "anthropic" or "openai" — empty = use env default
     base_url: str = ""  # OpenAI-compatible base URL — empty = use env default
@@ -31,7 +33,7 @@ class TurnConfig:
     turn_number: int
     max_turns: int
     user_feedback: str = ""
-    model: str = "claude-sonnet-4-5-20250929"
+    model: str = DEFAULT_MODEL_STRING
     max_tokens: int = 0  # 0 = use model max (configured via MAX_OUTPUT_TOKENS env var)
     provider: str = ""
     base_url: str = ""
@@ -49,6 +51,17 @@ class TurnResult:
     truncated: bool = False
     artifact_path: str = ""  # Path to the turn file in workspace
     tool_calls_made: int = 0  # Number of tool calls executed this turn
+
+    def to_dict(self) -> dict:
+        return {
+            "turn_number": self.turn_number,
+            "role": self.role,
+            "key_insights": self.key_insights,
+            "token_usage": self.token_usage,
+            "truncated": self.truncated,
+            "artifact_path": self.artifact_path,
+            "tool_calls_made": self.tool_calls_made,
+        }
 
 
 @dataclass
@@ -101,18 +114,7 @@ class CommunisState:
             "current_turn": self.current_turn,
             "current_role": self.current_role,
             "status": self.status,
-            "turn_results": [
-                {
-                    "turn_number": r.turn_number,
-                    "role": r.role,
-                    "key_insights": r.key_insights,
-                    "token_usage": r.token_usage,
-                    "truncated": r.truncated,
-                    "artifact_path": r.artifact_path,
-                    "tool_calls_made": r.tool_calls_made,
-                }
-                for r in self.turn_results
-            ],
+            "turn_results": [r.to_dict() for r in self.turn_results],
             "latest_message": self.latest_message,
             "workspace_dir": self.workspace_dir,
             "dangerous": self.dangerous,

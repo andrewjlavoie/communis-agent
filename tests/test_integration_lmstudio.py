@@ -233,7 +233,7 @@ async def test_full_3_turn_workflow():
         ):
             config = CommunisConfig(
                 idea="Design a simple CLI calculator in Python that supports add, subtract, multiply, divide",
-                num_turns=3,
+                max_turns=3,
                 model=LM_STUDIO_MODEL,
                 auto=True,
             )

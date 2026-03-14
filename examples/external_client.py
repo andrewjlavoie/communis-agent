@@ -19,9 +19,8 @@ import sys
 from temporalio.client import Client
 
 from models.data_types import CommunisConfig
+from shared.constants import TASK_QUEUE
 from workflows.communis_orchestrator import CommunisOrchestratorWorkflow
-
-TASK_QUEUE = "communis-task-queue"
 
 
 async def main():
@@ -32,7 +31,7 @@ async def main():
     # Start the workflow
     handle = await client.start_workflow(
         CommunisOrchestratorWorkflow.run,
-        CommunisConfig(idea=idea, num_turns=3, auto=True),
+        CommunisConfig(idea=idea, max_turns=3, auto=True),
         id="external-client-example",
         task_queue=TASK_QUEUE,
     )
@@ -46,7 +45,7 @@ async def main():
             break
 
         turn = state["current_turn"]
-        total = state["num_turns"]
+        total = state["max_turns"]
         role = state["current_role"] or "starting"
         status = state["status"]
         print(f"  [{status}] Turn {turn}/{total} — {role}")
@@ -72,12 +71,9 @@ async def main():
 
         path = Path(final_turn["artifact_path"])
         if path.exists():
-            text = path.read_text()
-            # Strip YAML frontmatter
-            if text.startswith("---"):
-                end = text.find("\n---\n", 3)
-                if end != -1:
-                    text = text[end + 5:]
+            from shared.frontmatter import parse_frontmatter
+
+            _, text = parse_frontmatter(path.read_text())
             print(f"\n{'='*60}")
             print(f"Final output ({final_turn['role']}):")
             print(f"{'='*60}")
