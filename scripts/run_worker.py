@@ -11,7 +11,7 @@ from temporalio.client import Client  # noqa: E402
 from temporalio.worker import Worker  # noqa: E402
 
 from activities.llm_activities import (  # noqa: E402
-    call_claude,
+    call_llm,
     extract_key_insights,
     plan_next_turn,
     summarize_artifacts,
@@ -54,7 +54,7 @@ async def main():
         ],
         activities=[
             # LLM activities
-            call_claude,
+            call_llm,
             extract_key_insights,
             plan_next_turn,
             summarize_artifacts,

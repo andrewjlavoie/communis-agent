@@ -13,7 +13,7 @@ from __future__ import annotations
 from temporalio import workflow
 
 with workflow.unsafe.imports_passed_through():
-    from activities.llm_activities import call_claude
+    from activities.llm_activities import call_llm
     from activities.tool_activities import execute_run_command
     from models.session_types import (
         ApprovalRequest,
@@ -203,17 +203,19 @@ class CommunisAgent:
         system_prompt = self._build_system_prompt()
         tools = [RUN_TOOL_DEFINITION, DELEGATE_TASK_TOOL]
 
-        # Build LLM messages from full conversation history (text only)
+        # Build LLM messages from full conversation history.
+        # Conversation entries with list content (tool_use/tool_result blocks)
+        # are passed through as-is to preserve tool call context across turns.
         messages: list[dict] = [
             {"role": m["role"], "content": m["content"]}
             for m in self.state.conversation
         ]
 
-        final_text_parts: list[str] = []
+        final_text = ""
 
         for _ in range(MAX_FRONT_AGENT_ITERATIONS):
             llm_response = await workflow.execute_activity(
-                call_claude,
+                call_llm,
                 args=[
                     messages,
                     system_prompt,
@@ -229,16 +231,20 @@ class CommunisAgent:
 
             content_blocks = llm_response.get("content_blocks", [])
             text = _extract_text_from_blocks(content_blocks)
-            if text:
-                final_text_parts.append(text)
-
             tool_uses = _extract_tool_uses(content_blocks)
 
             if not tool_uses:
-                # No tools — LLM is done responding
+                # No tools — LLM is done responding. Use this final text.
+                final_text = text
                 break
 
-            # Add assistant message (with tool_use blocks) to LLM messages
+            # Persist assistant message (with tool_use blocks) to conversation
+            # so the model retains tool call context across future turns.
+            self.state.conversation.append({
+                "role": "assistant",
+                "content": content_blocks,
+                "timestamp": self._now(),
+            })
             messages.append({"role": "assistant", "content": content_blocks})
 
             # Process each tool call
@@ -247,6 +253,14 @@ class CommunisAgent:
                 tool_name = tool_use.get("name", "")
                 tool_input = tool_use.get("input", {})
                 tool_use_id = tool_use.get("id", "")
+
+                # Emit tool_call event for visibility
+                self._add_event("tool_call", {
+                    "source": "front_agent",
+                    "tool_name": tool_name,
+                    "tool_input": tool_input,
+                    "thinking": text,  # LLM text alongside tool call
+                })
 
                 if tool_name == "run":
                     result = await self._handle_run_tool(tool_use_id, tool_input)
@@ -263,11 +277,15 @@ class CommunisAgent:
                         "content": f"[error] unknown tool: {tool_name}. Available: run, delegate_task",
                     })
 
-            # Add tool results to LLM messages for next iteration
+            # Persist tool results to conversation history
+            self.state.conversation.append({
+                "role": "user",
+                "content": tool_results,
+                "timestamp": self._now(),
+            })
             messages.append({"role": "user", "content": tool_results})
 
         # Add final text response to conversation
-        final_text = "\n\n".join(final_text_parts)
         if final_text:
             self.state.conversation.append({
                 "role": "assistant",
@@ -354,10 +372,22 @@ class CommunisAgent:
             retry_policy=LLM_RETRY_POLICY,
         )
 
+        # Emit tool_result event for visibility
+        output = exec_result["output"]
+        self._add_event("tool_result", {
+            "source": "front_agent",
+            "tool_name": "run",
+            "command": command,
+            "exit_code": exec_result["exit_code"],
+            "duration_ms": exec_result["duration_ms"],
+            "output_preview": output[:500],
+            "truncated": len(output) > 500,
+        })
+
         return {
             "type": "tool_result",
             "tool_use_id": tool_use_id,
-            "content": exec_result["output"],
+            "content": output,
         }
 
     async def _handle_delegate_tool(self, tool_use_id: str, tool_input: dict) -> dict:
@@ -452,6 +482,28 @@ class CommunisAgent:
                 "task_id": update.task_id,
                 "description": task.description,
                 "error": update.message,
+            })
+
+        elif update.update_type == "tool_call":
+            self._add_event("tool_call", {
+                "source": update.task_id,
+                "tool_name": "run",
+                "command": update.message,
+                "thinking": update.result_summary,  # LLM's reasoning text
+            })
+
+        elif update.update_type == "tool_result":
+            # Parse structured metadata from result_summary (exit:N|Nms)
+            parts = update.result_summary.split("|") if update.result_summary else []
+            exit_str = parts[0].replace("exit:", "") if parts else "0"
+            duration = parts[1] if len(parts) > 1 else ""
+            self._add_event("tool_result", {
+                "source": update.task_id,
+                "tool_name": "run",
+                "exit_code": int(exit_str) if exit_str.lstrip("-").isdigit() else 0,
+                "duration": duration,
+                "output_preview": update.message,
+                "truncated": len(update.message) >= 500,
             })
 
         elif update.update_type == "approval_request":

@@ -5,7 +5,7 @@ import asyncio
 from temporalio import workflow
 
 with workflow.unsafe.imports_passed_through():
-    from activities.llm_activities import call_claude, extract_key_insights
+    from activities.llm_activities import call_llm, extract_key_insights
     from activities.tool_activities import execute_run_command
     from activities.workspace_activities import read_turn_context, write_turn_artifact
     from models.data_types import TurnConfig, TurnResult
@@ -126,7 +126,7 @@ class CommunisTurnWorkflow:
             iteration += 1
 
             llm_response = await workflow.execute_activity(
-                call_claude,
+                call_llm,
                 args=[
                     messages,
                     system_prompt,

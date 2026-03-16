@@ -273,9 +273,12 @@ async def test_tool_result_reflected_in_answer(sandbox):
     print(f"  Final answer: {final_text[:300]}")
 
     # The actual count (hello.py, math.py, src/main.py, src/utils.py = 4 files)
-    # The LLM should mention a number that's close to reality
-    assert any(c.isdigit() for c in final_text), (
-        f"Final answer should contain a number, got: {final_text[:200]}"
+    # The LLM should mention a number — either as a digit or a word
+    NUMBER_WORDS = {"zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"}
+    has_digit = any(c.isdigit() for c in final_text)
+    has_number_word = any(w in final_text.lower() for w in NUMBER_WORDS)
+    assert has_digit or has_number_word, (
+        f"Final answer should contain a number (digit or word), got: {final_text[:200]}"
     )
 
 
@@ -359,7 +362,7 @@ async def test_full_workflow_direct_tool_use(sandbox):
     from temporalio.testing import WorkflowEnvironment
     from temporalio.worker import Worker
 
-    from activities.llm_activities import call_claude
+    from activities.llm_activities import call_llm
     from activities.tool_activities import execute_run_command
     from models.session_types import SessionConfig
     from workflows.session_workflow import CommunisAgent
@@ -370,7 +373,7 @@ async def test_full_workflow_direct_tool_use(sandbox):
             env.client,
             task_queue="integration-test-queue",
             workflows=[CommunisAgent, CommunisSubAgent],
-            activities=[call_claude, execute_run_command],
+            activities=[call_llm, execute_run_command],
         ):
             handle = await env.client.start_workflow(
                 CommunisAgent.run,
@@ -422,7 +425,7 @@ async def test_full_workflow_approval_flow():
     from temporalio.testing import WorkflowEnvironment
     from temporalio.worker import Worker
 
-    from activities.llm_activities import call_claude
+    from activities.llm_activities import call_llm
     from activities.tool_activities import execute_run_command
     from models.session_types import SessionConfig
     from workflows.session_workflow import CommunisAgent
@@ -433,7 +436,7 @@ async def test_full_workflow_approval_flow():
             env.client,
             task_queue="integration-test-queue",
             workflows=[CommunisAgent, CommunisSubAgent],
-            activities=[call_claude, execute_run_command],
+            activities=[call_llm, execute_run_command],
         ):
             handle = await env.client.start_workflow(
                 CommunisAgent.run,

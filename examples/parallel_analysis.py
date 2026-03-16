@@ -92,7 +92,7 @@ async def main():
     from temporalio.worker import Worker
 
     from activities.llm_activities import (
-        call_claude, extract_key_insights, plan_next_turn,
+        call_llm, extract_key_insights, plan_next_turn,
         summarize_artifacts, validate_user_feedback,
     )
     from activities.workspace_activities import (
@@ -107,7 +107,7 @@ async def main():
         task_queue=TASK_QUEUE,
         workflows=[ParallelAnalysisWorkflow, CommunisOrchestratorWorkflow, CommunisTurnWorkflow],
         activities=[
-            call_claude, plan_next_turn, extract_key_insights,
+            call_llm, plan_next_turn, extract_key_insights,
             summarize_artifacts, validate_user_feedback,
             init_workspace, read_turn_context, write_turn_artifact,
             write_workspace_summary, read_turn_file, collect_older_turns_text,

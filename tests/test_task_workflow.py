@@ -19,8 +19,8 @@ TASK_QUEUE = "test-queue"
 # --- Mock activities ---
 
 
-@activity.defn(name="call_claude")
-async def mock_call_claude(
+@activity.defn(name="call_llm")
+async def mock_call_llm(
     messages: list[dict],
     system_prompt: str,
     model: str = "",
@@ -52,7 +52,7 @@ async def mock_execute_run_command(
     }
 
 
-MOCK_ACTIVITIES = [mock_call_claude, mock_execute_run_command]
+MOCK_ACTIVITIES = [mock_call_llm, mock_execute_run_command]
 
 
 @pytest.fixture
@@ -109,8 +109,8 @@ async def test_task_workflow_with_tool_use_dangerous(env):
     """Task uses tools in dangerous mode (auto-approve)."""
     call_count = 0
 
-    @activity.defn(name="call_claude")
-    async def tool_call_claude(
+    @activity.defn(name="call_llm")
+    async def tool_call_llm(
         messages: list[dict],
         system_prompt: str,
         model: str = "",
@@ -151,7 +151,7 @@ async def test_task_workflow_with_tool_use_dangerous(env):
         env.client,
         task_queue=TASK_QUEUE,
         workflows=[CommunisSubAgent, CommunisAgent],
-        activities=[tool_call_claude, mock_execute_run_command],
+        activities=[tool_call_llm, mock_execute_run_command],
     ):
         session_handle = await env.client.start_workflow(
             CommunisAgent.run,
@@ -192,7 +192,7 @@ async def test_task_workflow_with_tool_use_dangerous(env):
 @pytest.mark.asyncio
 async def test_task_workflow_delegation_spawns_child(env):
     """Front agent delegates via delegate_task tool, spawning a CommunisSubAgent child."""
-    @activity.defn(name="call_claude")
+    @activity.defn(name="call_llm")
     async def delegate_claude(
         messages: list[dict],
         system_prompt: str,

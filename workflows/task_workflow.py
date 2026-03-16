@@ -13,7 +13,7 @@ import asyncio
 from temporalio import workflow
 
 with workflow.unsafe.imports_passed_through():
-    from activities.llm_activities import call_claude
+    from activities.llm_activities import call_llm
     from activities.tool_activities import execute_run_command
     from models.session_types import TaskSpec, TaskUpdate
     from tools.run_tool import RUN_TOOL_DEFINITION
@@ -148,7 +148,7 @@ class CommunisSubAgent:
             iteration += 1
 
             llm_response = await workflow.execute_activity(
-                call_claude,
+                call_llm,
                 args=[
                     messages,
                     system_prompt,
@@ -204,6 +204,17 @@ class CommunisSubAgent:
                         "content": "[error] run: missing required parameter 'command'",
                     })
                     continue
+
+                # Signal parent: tool_call for visibility (thinking = LLM text alongside tool call)
+                await parent.signal(
+                    "task_update",
+                    TaskUpdate(
+                        task_id=spec.task_id,
+                        update_type="tool_call",
+                        message=command,
+                        result_summary=text,  # LLM's reasoning text
+                    ),
+                )
 
                 # Human-in-the-loop approval (unless dangerous mode)
                 if not spec.dangerous:
@@ -265,7 +276,19 @@ class CommunisSubAgent:
                     "content": exec_result["output"],
                 })
 
-                # Signal progress after each tool call
+                # Signal parent: tool_result for visibility
+                output = exec_result["output"]
+                await parent.signal(
+                    "task_update",
+                    TaskUpdate(
+                        task_id=spec.task_id,
+                        update_type="tool_result",
+                        message=output[:500],
+                        result_summary=f"exit:{exec_result['exit_code']}|{exec_result['duration_ms']}ms",
+                    ),
+                )
+
+                # Signal progress after every few tool calls
                 if tool_calls_made % 3 == 0:
                     self.progress = f"Executed {tool_calls_made} commands..."
                     await parent.signal(

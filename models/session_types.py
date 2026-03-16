@@ -20,7 +20,7 @@ class SessionConfig:
                 1. front_agent_respond(model="")   — front agent LLM calls
                 2. TaskSpec(model="")              — inherited by sub-agents
               → TaskWorkflow passes spec.model to:
-                  call_claude(model="")
+                  call_llm(model="")
                 → Activity layer resolves:
                     model = model or DEFAULT_MODEL
                     # DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "claude-sonnet-4-5-20250929")

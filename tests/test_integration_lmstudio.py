@@ -194,7 +194,7 @@ async def test_full_3_turn_workflow():
     from temporalio.worker import Worker
 
     from activities.llm_activities import (
-        call_claude,
+        call_llm,
         extract_key_insights,
         plan_next_turn,
         summarize_artifacts,
@@ -218,7 +218,7 @@ async def test_full_3_turn_workflow():
             task_queue="integration-test-queue",
             workflows=[CommunisOrchestratorWorkflow, CommunisTurnWorkflow],
             activities=[
-                call_claude,
+                call_llm,
                 plan_next_turn,
                 extract_key_insights,
                 summarize_artifacts,

@@ -274,7 +274,7 @@ def _parse_llm_json(text: str, default: dict | list) -> dict | list:
 
 
 @activity.defn
-async def call_claude(
+async def call_llm(
     messages: list[dict],
     system_prompt: str,
     model: str = "",

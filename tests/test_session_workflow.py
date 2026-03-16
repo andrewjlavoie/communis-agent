@@ -19,8 +19,8 @@ TASK_QUEUE = "test-queue"
 # --- Mock activities ---
 
 
-@activity.defn(name="call_claude")
-async def mock_call_claude_text(
+@activity.defn(name="call_llm")
+async def mock_call_llm_text(
     messages: list[dict],
     system_prompt: str,
     model: str = "",
@@ -45,8 +45,8 @@ async def mock_call_claude_text(
     }
 
 
-@activity.defn(name="call_claude")
-async def mock_call_claude_delegate(
+@activity.defn(name="call_llm")
+async def mock_call_llm_delegate(
     messages: list[dict],
     system_prompt: str,
     model: str = "",
@@ -86,8 +86,8 @@ async def mock_call_claude_delegate(
     }
 
 
-@activity.defn(name="call_claude")
-async def mock_call_claude_sub_agent(
+@activity.defn(name="call_llm")
+async def mock_call_llm_sub_agent(
     messages: list[dict],
     system_prompt: str,
     model: str = "",
@@ -127,7 +127,7 @@ async def test_session_user_message_text_response(env):
         env.client,
         task_queue=TASK_QUEUE,
         workflows=[CommunisAgent, CommunisSubAgent],
-        activities=[mock_call_claude_text, mock_execute_run_command],
+        activities=[mock_call_llm_text, mock_execute_run_command],
     ):
         handle = await env.client.start_workflow(
             CommunisAgent.run,
@@ -160,8 +160,8 @@ async def test_session_direct_tool_use_dangerous(env):
     """Front agent uses run tool directly in dangerous mode (auto-approve)."""
     call_count = 0
 
-    @activity.defn(name="call_claude")
-    async def tool_call_claude(
+    @activity.defn(name="call_llm")
+    async def tool_call_llm(
         messages: list[dict],
         system_prompt: str,
         model: str = "",
@@ -200,7 +200,7 @@ async def test_session_direct_tool_use_dangerous(env):
         env.client,
         task_queue=TASK_QUEUE,
         workflows=[CommunisAgent, CommunisSubAgent],
-        activities=[tool_call_claude, mock_execute_run_command],
+        activities=[tool_call_llm, mock_execute_run_command],
     ):
         handle = await env.client.start_workflow(
             CommunisAgent.run,
@@ -234,7 +234,7 @@ async def test_session_delegation_spawns_task(env):
         env.client,
         task_queue=TASK_QUEUE,
         workflows=[CommunisAgent, CommunisSubAgent],
-        activities=[mock_call_claude_delegate, mock_execute_run_command],
+        activities=[mock_call_llm_delegate, mock_execute_run_command],
     ):
         handle = await env.client.start_workflow(
             CommunisAgent.run,
@@ -256,12 +256,12 @@ async def test_session_delegation_spawns_task(env):
         started = [e for e in events if e["event_type"] == "task_started"]
         assert len(started) == 1
 
-        # Wait for task_completed (sub-agent uses mock_call_claude_delegate
+        # Wait for task_completed (sub-agent uses mock_call_llm_delegate
         # which on second call returns text — but the sub-agent uses same mock,
         # which will return delegate tool_use. Since sub-agent doesn't have
         # delegate_task tool, it'll get an error. That's OK for this test —
         # we just need to verify the task was spawned.)
-        # Actually the sub-agent has its own call_claude that returns the same mock.
+        # Actually the sub-agent has its own call_llm that returns the same mock.
         # Let's just check the task was started and has an assistant message.
         msg_events = [e for e in events if e["event_type"] == "assistant_message"]
         assert len(msg_events) >= 1
@@ -280,7 +280,7 @@ async def test_session_end_signal(env):
         env.client,
         task_queue=TASK_QUEUE,
         workflows=[CommunisAgent, CommunisSubAgent],
-        activities=[mock_call_claude_text, mock_execute_run_command],
+        activities=[mock_call_llm_text, mock_execute_run_command],
     ):
         handle = await env.client.start_workflow(
             CommunisAgent.run,
@@ -302,7 +302,7 @@ async def test_session_multiple_messages(env):
         env.client,
         task_queue=TASK_QUEUE,
         workflows=[CommunisAgent, CommunisSubAgent],
-        activities=[mock_call_claude_text, mock_execute_run_command],
+        activities=[mock_call_llm_text, mock_execute_run_command],
     ):
         handle = await env.client.start_workflow(
             CommunisAgent.run,
@@ -341,7 +341,7 @@ async def test_session_get_events_since(env):
         env.client,
         task_queue=TASK_QUEUE,
         workflows=[CommunisAgent, CommunisSubAgent],
-        activities=[mock_call_claude_text, mock_execute_run_command],
+        activities=[mock_call_llm_text, mock_execute_run_command],
     ):
         handle = await env.client.start_workflow(
             CommunisAgent.run,
@@ -381,7 +381,7 @@ async def test_session_direct_tool_approval_flow(env):
     """Front agent requests tool approval, user approves, tool executes."""
     call_count = 0
 
-    @activity.defn(name="call_claude")
+    @activity.defn(name="call_llm")
     async def approval_claude(
         messages: list[dict],
         system_prompt: str,

@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from activities.llm_activities import (
-    call_claude,
+    call_llm,
     extract_key_insights,
     plan_next_turn,
     summarize_artifacts,
@@ -29,11 +29,11 @@ def _make_llm_response(text: str, input_tokens: int = 100, output_tokens: int = 
 
 
 @pytest.mark.asyncio
-async def test_call_claude():
+async def test_call_llm():
     mock_response = _make_llm_response("Hello world", 150, 75)
 
     with patch("activities.llm_activities._call_llm", new_callable=AsyncMock, return_value=mock_response):
-        result = await call_claude(
+        result = await call_llm(
             messages=[{"role": "user", "content": "Hi"}],
             system_prompt="You are helpful.",
             model="claude-sonnet-4-5-20250929",

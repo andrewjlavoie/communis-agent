@@ -3,6 +3,11 @@
 Two concurrent asyncio tasks:
 1. Input loop: reads user input via run_in_executor
 2. Event poll loop: queries get_events_since every 0.5s and renders events
+
+Approval UX:
+- Approvals pop up and lock the chat (y/n/wait)
+- "wait" defers the approval and unlocks the chat
+- /approvals shows deferred approvals and lets the user act on them
 """
 
 from __future__ import annotations
@@ -44,7 +49,11 @@ class SessionCLI:
         self.last_event_id = 0
         self.handle = None
         self.session_id = ""
-        self._pending_approval: dict | None = None
+
+        # Approval state
+        self._active_approval: dict | None = None  # currently blocking input
+        self._deferred_approvals: list[dict] = []  # user said "wait"
+        self._approval_queue: list[dict] = []  # arrived while another is active
 
     async def run(self):
         """Start the session workflow and run input + poll loops concurrently."""
@@ -115,6 +124,66 @@ class SessionCLI:
         signal.signal(signal.SIGINT, on_signal)
         signal.signal(signal.SIGTERM, on_signal)
 
+    # --- Approval management ---
+
+    def _push_approval(self, approval: dict):
+        """New approval arrived. Either activate it or queue it."""
+        if self._active_approval is None:
+            self._active_approval = approval
+            self._render_approval_prompt(approval)
+        else:
+            # Already have an active approval — queue this one
+            self._approval_queue.append(approval)
+            aid_short = approval["approval_id"][:8]
+            console.print(
+                f"  [yellow]+ Queued approval {aid_short}[/yellow] "
+                f"[dim]({len(self._approval_queue) + len(self._deferred_approvals)} waiting — /approvals to view)[/dim]"
+            )
+
+    def _activate_next_approval(self):
+        """After resolving active approval, activate next from queue."""
+        self._active_approval = None
+        if self._approval_queue:
+            next_approval = self._approval_queue.pop(0)
+            self._active_approval = next_approval
+            self._render_approval_prompt(next_approval)
+
+    def _render_approval_prompt(self, approval: dict):
+        """Render the approval panel that locks input."""
+        task_desc = approval.get("task_description", "")
+        tool_input = approval.get("tool_input", {})
+        command = tool_input.get("command", str(tool_input))
+
+        console.print()
+        console.print(Panel(
+            f"[bold]{command}[/bold]",
+            title=f"[yellow]Approval Required[/yellow] — {task_desc}",
+            subtitle="[dim]y/yes to approve, n/no to deny, w/wait to defer[/dim]",
+            border_style="yellow",
+        ))
+
+    async def _resolve_approval(self, approval_id: str, approved: bool):
+        """Send approval decision to the workflow."""
+        await self.handle.signal(
+            CommunisAgent.approval_response,
+            [approval_id, approved],
+        )
+        status = "[green]Approved[/green]" if approved else "[red]Denied[/red]"
+        console.print(f"  {status}")
+
+    async def _defer_approval(self):
+        """Move the active approval to deferred list."""
+        if self._active_approval:
+            self._deferred_approvals.append(self._active_approval)
+            aid_short = self._active_approval["approval_id"][:8]
+            console.print(
+                f"  [yellow]Deferred {aid_short}[/yellow] "
+                f"[dim]({len(self._deferred_approvals)} deferred — /approvals to manage)[/dim]"
+            )
+            self._activate_next_approval()
+
+    # --- Input loop ---
+
     async def _input_loop(self):
         loop = asyncio.get_running_loop()
         while self.running:
@@ -131,22 +200,24 @@ class SessionCLI:
             if not line:
                 continue
 
-            # Handle commands
+            # Commands always work, even during approvals
             if line.startswith("/"):
                 await self._handle_command(line)
                 continue
 
-            # Handle approval responses
-            if self._pending_approval and line.lower() in ("y", "yes", "n", "no"):
-                approved = line.lower() in ("y", "yes")
-                approval_id = self._pending_approval["approval_id"]
-                await self.handle.signal(
-                    CommunisAgent.approval_response,
-                    [approval_id, approved],
-                )
-                status = "[green]Approved[/green]" if approved else "[red]Denied[/red]"
-                console.print(f"[dim]{status}[/dim]")
-                self._pending_approval = None
+            # Active approval locks input to y/n/wait
+            if self._active_approval:
+                lower = line.lower()
+                if lower in ("y", "yes"):
+                    await self._resolve_approval(self._active_approval["approval_id"], True)
+                    self._activate_next_approval()
+                elif lower in ("n", "no"):
+                    await self._resolve_approval(self._active_approval["approval_id"], False)
+                    self._activate_next_approval()
+                elif lower in ("w", "wait"):
+                    await self._defer_approval()
+                else:
+                    console.print("[dim]Approval pending — respond y/n/wait (or /approvals to view all)[/dim]")
                 continue
 
             # Regular message
@@ -154,11 +225,16 @@ class SessionCLI:
 
     def _get_input(self) -> str | None:
         try:
-            if self._pending_approval:
-                return input("[y/n or message] > ")
+            if self._active_approval:
+                return input("[y/n/wait] > ")
+            n_deferred = len(self._deferred_approvals) + len(self._approval_queue)
+            if n_deferred:
+                return input(f"({n_deferred} waiting) > ")
             return input("> ")
         except (EOFError, KeyboardInterrupt):
             return None
+
+    # --- Event poll loop ---
 
     async def _event_poll_loop(self):
         while self.running:
@@ -230,27 +306,71 @@ class SessionCLI:
             task_desc = data.get("task_description", "")
             tool_name = data.get("tool_name", "")
             tool_input = data.get("tool_input", {})
-            command = tool_input.get("command", str(tool_input))
 
-            self._pending_approval = {"approval_id": approval_id}
-            console.print()
-            console.print(Panel(
-                f"[bold]{command}[/bold]",
-                title=f"[yellow]Approval Required[/yellow] — {task_desc}",
-                subtitle="[dim]y/yes to approve, n/no to deny[/dim]",
-                border_style="yellow",
-            ))
+            self._push_approval({
+                "approval_id": approval_id,
+                "task_description": task_desc,
+                "tool_name": tool_name,
+                "tool_input": tool_input,
+            })
 
         elif event_type == "approval_resolved":
             approved = data.get("approved", False)
             status = "[green]approved[/green]" if approved else "[red]denied[/red]"
             console.print(f"[dim]Approval {status}[/dim]")
 
+        elif event_type == "tool_call":
+            if self.verbose:
+                source = data.get("source", "agent")
+                tool_name = data.get("tool_name", "run")
+                tool_input = data.get("tool_input", {})
+                command = data.get("command", "") or tool_input.get("command", "")
+                thinking = data.get("thinking", "")
+
+                agent_name = "agent" if source == "front_agent" else f"task:{source[:12]}"
+
+                if thinking:
+                    console.print(f"  [magenta][thinking - {agent_name}][/magenta] [dim italic]{thinking}[/dim italic]")
+
+                if tool_name == "delegate_task":
+                    desc = tool_input.get("description", "")
+                    console.print(f"  [dim][{agent_name}][/dim] [cyan]delegate_task[/cyan] {desc}")
+                else:
+                    console.print(f"  [dim][{agent_name}][/dim] [yellow]$ {command}[/yellow]")
+
+        elif event_type == "tool_result":
+            if self.verbose:
+                source = data.get("source", "agent")
+                exit_code = data.get("exit_code", 0)
+                duration_ms = data.get("duration_ms", data.get("duration", ""))
+                preview = data.get("output_preview", "")
+                truncated = data.get("truncated", False)
+
+                agent_name = "agent" if source == "front_agent" else f"task:{source[:12]}"
+
+                exit_style = "green" if exit_code == 0 else "red"
+
+                # Show output preview (first few lines, dimmed)
+                if preview.strip():
+                    lines = preview.strip().split("\n")
+                    display = lines[:8]
+                    for line in display:
+                        console.print(f"  [dim]{line}[/dim]")
+                    if len(lines) > 8 or truncated:
+                        console.print(f"  [dim]  ... (truncated)[/dim]")
+
+                console.print(
+                    f"  [dim][{agent_name}] [{exit_style}]exit:{exit_code}[/{exit_style}]"
+                    f" | {duration_ms}[/dim]"
+                )
+
         elif event_type == "conversation_cleared":
             pass  # Already printed by /clear handler
 
         elif event_type == "session_ended":
             pass  # Handled by main loop
+
+    # --- Commands ---
 
     async def _handle_command(self, line: str):
         parts = line.split(maxsplit=1)
@@ -261,16 +381,41 @@ class SessionCLI:
 
         elif cmd == "/help":
             console.print(Panel(
+                "[bold]/approvals[/bold] — View and manage deferred approvals\n"
+                "[bold]/approve <n>[/bold] — Approve a deferred approval by number\n"
+                "[bold]/deny <n>[/bold] — Deny a deferred approval by number\n"
                 "[bold]/clear[/bold] — Clear conversation history (start fresh, keep tasks)\n"
                 "[bold]/tasks[/bold] — List all tasks\n"
                 "[bold]/task <id>[/bold] — Show task details\n"
                 "[bold]/cancel <id>[/bold] — Cancel a running task\n"
                 "[bold]/status[/bold] — Show session info\n"
                 "[bold]/quit[/bold] — End session\n"
-                "[bold]/help[/bold] — Show this help",
+                "[bold]/help[/bold] — Show this help\n"
+                "\n[dim]During approvals: y/yes, n/no, w/wait[/dim]",
                 title="Commands",
                 border_style="dim",
             ))
+
+        elif cmd == "/approvals":
+            await self._show_approvals()
+
+        elif cmd == "/approve":
+            if len(parts) < 2:
+                console.print("[dim]Usage: /approve <number> (see /approvals for list)[/dim]")
+                return
+            await self._resolve_deferred(parts[1].strip(), approved=True)
+
+        elif cmd == "/deny":
+            if len(parts) < 2:
+                console.print("[dim]Usage: /deny <number> (see /approvals for list)[/dim]")
+                return
+            await self._resolve_deferred(parts[1].strip(), approved=False)
+
+        elif cmd == "/approveall":
+            await self._resolve_all_deferred(approved=True)
+
+        elif cmd == "/denyall":
+            await self._resolve_all_deferred(approved=False)
 
         elif cmd == "/tasks":
             state = await self.handle.query(CommunisAgent.get_state)
@@ -362,18 +507,101 @@ class SessionCLI:
                 if t.get("status") in ("pending", "running", "waiting_approval")
             ])
             n_events = state.get("event_counter", 0)
+            n_deferred = len(self._deferred_approvals)
+            n_queued = len(self._approval_queue)
+            approval_line = ""
+            if n_deferred or n_queued:
+                approval_line = f"\n[bold]Approvals:[/bold] {n_deferred} deferred, {n_queued} queued"
             console.print(Panel(
                 f"[bold]Session:[/bold] {self.session_id}\n"
                 f"[bold]Status:[/bold] {state.get('status', 'unknown')}\n"
                 f"[bold]Messages:[/bold] {n_msgs}\n"
                 f"[bold]Tasks:[/bold] {n_tasks} total, {n_active} active\n"
-                f"[bold]Events:[/bold] {n_events}",
+                f"[bold]Events:[/bold] {n_events}"
+                f"{approval_line}",
                 title="Session Info",
                 border_style="dim",
             ))
 
         else:
             console.print(f"[dim]Unknown command: {cmd}. Type /help for available commands.[/dim]")
+
+    # --- Approval management commands ---
+
+    async def _show_approvals(self):
+        """Show all deferred and queued approvals."""
+        all_approvals = self._deferred_approvals + self._approval_queue
+        if not all_approvals and not self._active_approval:
+            console.print("[dim]No pending approvals.[/dim]")
+            return
+
+        if self._active_approval:
+            tool_input = self._active_approval.get("tool_input", {})
+            command = tool_input.get("command", str(tool_input))
+            task_desc = self._active_approval.get("task_description", "")
+            console.print(Panel(
+                f"[bold]{command}[/bold]\n"
+                f"[dim]Source: {task_desc}[/dim]",
+                title="[yellow]Active (blocking input)[/yellow]",
+                border_style="yellow",
+            ))
+
+        if all_approvals:
+            table = Table(title="Deferred Approvals", show_lines=True, border_style="yellow")
+            table.add_column("#", style="bold yellow", width=4)
+            table.add_column("Source", style="dim")
+            table.add_column("Command")
+            table.add_column("ID", style="dim")
+
+            for i, approval in enumerate(all_approvals, 1):
+                tool_input = approval.get("tool_input", {})
+                command = tool_input.get("command", str(tool_input))
+                task_desc = approval.get("task_description", "")
+                aid = approval["approval_id"][:8]
+                table.add_row(str(i), task_desc, command, aid)
+
+            console.print(table)
+            console.print("[dim]Use /approve <n> or /deny <n> to resolve, /approveall or /denyall for batch[/dim]")
+
+    async def _resolve_deferred(self, index_str: str, approved: bool):
+        """Resolve a deferred approval by its 1-based index."""
+        all_approvals = self._deferred_approvals + self._approval_queue
+
+        try:
+            idx = int(index_str) - 1
+        except ValueError:
+            console.print("[dim]Usage: /approve <number> or /deny <number>[/dim]")
+            return
+
+        if idx < 0 or idx >= len(all_approvals):
+            console.print(f"[dim]Invalid number. {len(all_approvals)} approvals pending.[/dim]")
+            return
+
+        approval = all_approvals[idx]
+        # Remove from whichever list it's in
+        if idx < len(self._deferred_approvals):
+            self._deferred_approvals.pop(idx)
+        else:
+            self._approval_queue.pop(idx - len(self._deferred_approvals))
+
+        await self._resolve_approval(approval["approval_id"], approved)
+
+    async def _resolve_all_deferred(self, approved: bool):
+        """Approve or deny all deferred + queued approvals."""
+        all_approvals = self._deferred_approvals + self._approval_queue
+        if not all_approvals:
+            console.print("[dim]No deferred approvals.[/dim]")
+            return
+
+        count = len(all_approvals)
+        for approval in all_approvals:
+            await self._resolve_approval(approval["approval_id"], approved)
+
+        self._deferred_approvals.clear()
+        self._approval_queue.clear()
+
+        action = "Approved" if approved else "Denied"
+        console.print(f"  [{'green' if approved else 'red'}]{action} {count} approvals[/{'green' if approved else 'red'}]")
 
 
 async def run_session_cli(

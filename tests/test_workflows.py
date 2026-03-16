@@ -31,8 +31,8 @@ def _get_test_workspace() -> str:
 # --- Mock LLM activities ---
 
 
-@activity.defn(name="call_claude")
-async def mock_call_claude(
+@activity.defn(name="call_llm")
+async def mock_call_llm(
     messages: list[dict],
     system_prompt: str,
     model: str = "",
@@ -159,7 +159,7 @@ async def mock_write_subcommunis_summary(workspace_dir: str, turn_number: int, s
 
 ALL_MOCK_ACTIVITIES = [
     # LLM
-    mock_call_claude,
+    mock_call_llm,
     mock_extract_key_insights,
     mock_plan_next_turn,
     mock_summarize_artifacts,
@@ -204,7 +204,7 @@ async def test_communis_turn_workflow(env):
         env.client,
         task_queue=TASK_QUEUE,
         workflows=[CommunisTurnWorkflow],
-        activities=[mock_call_claude, mock_extract_key_insights, mock_read_turn_context, mock_write_turn_artifact],
+        activities=[mock_call_llm, mock_extract_key_insights, mock_read_turn_context, mock_write_turn_artifact],
     ):
         config = TurnConfig(
             workspace_dir=str(ws),
@@ -437,8 +437,8 @@ async def test_orchestrator_cancel_during_feedback(env):
 async def test_orchestrator_cancel_during_turn(env):
     """Test that cancelling during a running turn returns partial results."""
     # Use a slow mock to simulate a long-running turn
-    @activity.defn(name="call_claude")
-    async def slow_call_claude(
+    @activity.defn(name="call_llm")
+    async def slow_call_llm(
         messages: list[dict],
         system_prompt: str,
         model: str = "",
@@ -456,7 +456,7 @@ async def test_orchestrator_cancel_during_turn(env):
         }
 
     slow_activities = [
-        slow_call_claude,
+        slow_call_llm,
         mock_extract_key_insights,
         mock_plan_next_turn,
         mock_summarize_artifacts,
@@ -509,8 +509,8 @@ async def test_turn_with_tool_use_dangerous(env):
     """Test that a turn workflow handles tool_use responses in dangerous mode."""
     call_count = 0
 
-    @activity.defn(name="call_claude")
-    async def tool_call_claude(
+    @activity.defn(name="call_llm")
+    async def tool_call_llm(
         messages: list[dict],
         system_prompt: str,
         model: str = "",
@@ -556,7 +556,7 @@ async def test_turn_with_tool_use_dangerous(env):
         task_queue=TASK_QUEUE,
         workflows=[CommunisTurnWorkflow],
         activities=[
-            tool_call_claude,
+            tool_call_llm,
             mock_extract_key_insights,
             mock_execute_run_command,
             mock_read_turn_context,
@@ -588,8 +588,8 @@ async def test_turn_with_tool_use_dangerous(env):
 @pytest.mark.asyncio
 async def test_turn_with_tool_approval(env):
     """Test that tool approval signal flow works in non-dangerous mode."""
-    @activity.defn(name="call_claude")
-    async def tool_call_claude(
+    @activity.defn(name="call_llm")
+    async def tool_call_llm(
         messages: list[dict],
         system_prompt: str,
         model: str = "",
@@ -639,7 +639,7 @@ async def test_turn_with_tool_approval(env):
         task_queue=TASK_QUEUE,
         workflows=[CommunisTurnWorkflow],
         activities=[
-            tool_call_claude,
+            tool_call_llm,
             mock_extract_key_insights,
             mock_execute_run_command,
             mock_read_turn_context,
@@ -682,8 +682,8 @@ async def test_turn_with_tool_approval(env):
 @pytest.mark.asyncio
 async def test_turn_with_tool_denial(env):
     """Test that denied tool calls are properly handled."""
-    @activity.defn(name="call_claude")
-    async def denial_call_claude(
+    @activity.defn(name="call_llm")
+    async def denial_call_llm(
         messages: list[dict],
         system_prompt: str,
         model: str = "",
@@ -735,7 +735,7 @@ async def test_turn_with_tool_denial(env):
         task_queue=TASK_QUEUE,
         workflows=[CommunisTurnWorkflow],
         activities=[
-            denial_call_claude,
+            denial_call_llm,
             mock_extract_key_insights,
             mock_execute_run_command,
             mock_read_turn_context,
@@ -830,7 +830,7 @@ async def test_orchestrator_goal_complete(env):
         }
 
     activities = [
-        mock_call_claude,
+        mock_call_llm,
         mock_extract_key_insights,
         goal_complete_planner,
         mock_summarize_artifacts,
@@ -939,7 +939,7 @@ async def test_orchestrator_spawn_subcommunis(env):
             }
 
     activities = [
-        mock_call_claude,
+        mock_call_llm,
         mock_extract_key_insights,
         spawn_planner,
         mock_summarize_artifacts,
@@ -1087,7 +1087,7 @@ async def test_subcommunis_no_recursion(env):
         }
 
     activities = [
-        mock_call_claude,
+        mock_call_llm,
         mock_extract_key_insights,
         counting_planner,
         mock_summarize_artifacts,
