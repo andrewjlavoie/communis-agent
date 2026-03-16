@@ -1,9 +1,9 @@
-"""SessionWorkflow — front agent for the interactive session REPL.
+"""CommunisAgent — front agent for the interactive session REPL.
 
 Long-lived entity workflow that:
 - Receives user messages via signals
 - Runs an agent loop: LLM call → direct tool use or delegation → repeat
-- Manages sub-agent TaskWorkflows as child workflows
+- Manages CommunisSubAgent child workflows
 - Routes approval requests between sub-agents and the CLI
 - Exposes state via queries for the CLI event poll loop
 """
@@ -27,7 +27,7 @@ with workflow.unsafe.imports_passed_through():
     from tools.delegate_tool import DELEGATE_TASK_TOOL
     from tools.run_tool import RUN_TOOL_DEFINITION
     from workflows.constants import LLM_RETRY_POLICY, LLM_TIMEOUT, TOOL_TIMEOUT
-    from workflows.task_workflow import TaskWorkflow
+    from workflows.task_workflow import CommunisSubAgent
 
 # Safety limit on tool iterations per user message
 MAX_FRONT_AGENT_ITERATIONS = 10
@@ -44,7 +44,7 @@ def _extract_tool_uses(content_blocks: list[dict]) -> list[dict]:
 
 
 @workflow.defn
-class SessionWorkflow:
+class CommunisAgent:
     """Front agent workflow for the interactive session REPL."""
 
     def __init__(self):
@@ -372,7 +372,8 @@ class SessionWorkflow:
                 f"{msg['role']}: {msg['content']}" for msg in recent
             )
 
-        task_id = f"task-{workflow.uuid4().hex[:8]}"
+        user_part = f"-{self.config.user}" if self.config.user else ""
+        task_id = f"communis-subagent{user_part}-{workflow.uuid4().hex[:8]}"
 
         spec = TaskSpec(
             task_id=task_id,
@@ -394,7 +395,7 @@ class SessionWorkflow:
 
         # Start child workflow (fire-and-forget — updates come via signals)
         await workflow.start_child_workflow(
-            TaskWorkflow.run,
+            CommunisSubAgent.run,
             spec,
             id=task_id,
         )

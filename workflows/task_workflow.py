@@ -57,10 +57,10 @@ def _extract_tool_uses(content_blocks: list[dict]) -> list[dict]:
 
 
 @workflow.defn
-class TaskWorkflow:
+class CommunisSubAgent:
     """Sub-agent workflow: executes a task using an LLM + tool loop.
 
-    Signals its parent SessionWorkflow with progress updates, completion,
+    Signals its parent CommunisAgent with progress updates, completion,
     failures, and approval requests.
     """
 

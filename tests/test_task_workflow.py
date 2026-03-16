@@ -1,4 +1,4 @@
-"""Tests for TaskWorkflow — sub-agent with LLM + tool loop."""
+"""Tests for CommunisSubAgent — sub-agent with LLM + tool loop."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
 from models.session_types import SessionConfig, TaskSpec
-from workflows.session_workflow import SessionWorkflow
-from workflows.task_workflow import TaskWorkflow
+from workflows.session_workflow import CommunisAgent
+from workflows.task_workflow import CommunisSubAgent
 
 TASK_QUEUE = "test-queue"
 
@@ -67,12 +67,12 @@ async def test_task_workflow_simple_completion(env):
     async with Worker(
         env.client,
         task_queue=TASK_QUEUE,
-        workflows=[TaskWorkflow, SessionWorkflow],
+        workflows=[CommunisSubAgent, CommunisAgent],
         activities=MOCK_ACTIVITIES,
     ):
         # Start session (task needs a parent to signal)
         session_handle = await env.client.start_workflow(
-            SessionWorkflow.run,
+            CommunisAgent.run,
             SessionConfig(),
             id="session-test-1",
             task_queue=TASK_QUEUE,
@@ -85,7 +85,7 @@ async def test_task_workflow_simple_completion(env):
             parent_session_id="session-test-1",
         )
         result = await env.client.execute_workflow(
-            TaskWorkflow.run,
+            CommunisSubAgent.run,
             spec,
             id="task-simple-1",
             task_queue=TASK_QUEUE,
@@ -95,7 +95,7 @@ async def test_task_workflow_simple_completion(env):
         assert "Task complete" in result["summary"]
 
         try:
-            await session_handle.signal(SessionWorkflow.end_session)
+            await session_handle.signal(CommunisAgent.end_session)
         except Exception:
             pass
         try:
@@ -150,11 +150,11 @@ async def test_task_workflow_with_tool_use_dangerous(env):
     async with Worker(
         env.client,
         task_queue=TASK_QUEUE,
-        workflows=[TaskWorkflow, SessionWorkflow],
+        workflows=[CommunisSubAgent, CommunisAgent],
         activities=[tool_call_claude, mock_execute_run_command],
     ):
         session_handle = await env.client.start_workflow(
-            SessionWorkflow.run,
+            CommunisAgent.run,
             SessionConfig(),
             id="session-test-tool",
             task_queue=TASK_QUEUE,
@@ -169,7 +169,7 @@ async def test_task_workflow_with_tool_use_dangerous(env):
         )
 
         result = await env.client.execute_workflow(
-            TaskWorkflow.run,
+            CommunisSubAgent.run,
             spec,
             id="task-tool-1",
             task_queue=TASK_QUEUE,
@@ -180,7 +180,7 @@ async def test_task_workflow_with_tool_use_dangerous(env):
         assert call_count == 2
 
         try:
-            await session_handle.signal(SessionWorkflow.end_session)
+            await session_handle.signal(CommunisAgent.end_session)
         except Exception:
             pass
         try:
@@ -191,7 +191,7 @@ async def test_task_workflow_with_tool_use_dangerous(env):
 
 @pytest.mark.asyncio
 async def test_task_workflow_delegation_spawns_child(env):
-    """Front agent delegates via delegate_task tool, spawning a TaskWorkflow child."""
+    """Front agent delegates via delegate_task tool, spawning a CommunisSubAgent child."""
     @activity.defn(name="call_claude")
     async def delegate_claude(
         messages: list[dict],
@@ -238,31 +238,31 @@ async def test_task_workflow_delegation_spawns_child(env):
     async with Worker(
         env.client,
         task_queue=TASK_QUEUE,
-        workflows=[TaskWorkflow, SessionWorkflow],
+        workflows=[CommunisSubAgent, CommunisAgent],
         activities=[delegate_claude, mock_execute_run_command],
     ):
         handle = await env.client.start_workflow(
-            SessionWorkflow.run,
+            CommunisAgent.run,
             SessionConfig(dangerous=True),
             id="session-deleg-test",
             task_queue=TASK_QUEUE,
         )
 
-        await handle.signal(SessionWorkflow.user_message, "Do some work")
+        await handle.signal(CommunisAgent.user_message, "Do some work")
 
         # Wait for task_started and task_completed
         for _attempt in range(60):
-            events = await handle.query(SessionWorkflow.get_events_since, 0)
+            events = await handle.query(CommunisAgent.get_events_since, 0)
             if any(e["event_type"] == "task_completed" for e in events):
                 break
             await asyncio.sleep(0.3)
 
-        events = await handle.query(SessionWorkflow.get_events_since, 0)
+        events = await handle.query(CommunisAgent.get_events_since, 0)
         assert any(e["event_type"] == "task_started" for e in events)
         assert any(e["event_type"] == "task_completed" for e in events)
 
         try:
-            await handle.signal(SessionWorkflow.end_session)
+            await handle.signal(CommunisAgent.end_session)
         except Exception:
             pass
         try:

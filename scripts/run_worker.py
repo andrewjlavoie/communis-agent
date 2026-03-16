@@ -32,8 +32,8 @@ from activities.workspace_activities import (  # noqa: E402
 from shared.constants import TASK_QUEUE  # noqa: E402
 from workflows.communis_orchestrator import CommunisOrchestratorWorkflow  # noqa: E402
 from workflows.communis_turn import CommunisTurnWorkflow  # noqa: E402
-from workflows.session_workflow import SessionWorkflow  # noqa: E402
-from workflows.task_workflow import TaskWorkflow  # noqa: E402
+from workflows.session_workflow import CommunisAgent  # noqa: E402
+from workflows.task_workflow import CommunisSubAgent  # noqa: E402
 
 
 async def main():
@@ -49,8 +49,8 @@ async def main():
         workflows=[
             CommunisOrchestratorWorkflow,
             CommunisTurnWorkflow,
-            SessionWorkflow,
-            TaskWorkflow,
+            CommunisAgent,
+            CommunisSubAgent,
         ],
         activities=[
             # LLM activities

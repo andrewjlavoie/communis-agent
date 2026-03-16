@@ -1,4 +1,4 @@
-"""Tests for SessionWorkflow — front agent with direct tool use and task delegation."""
+"""Tests for CommunisAgent — front agent with direct tool use and task delegation."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
 from models.session_types import SessionConfig
-from workflows.session_workflow import SessionWorkflow
-from workflows.task_workflow import TaskWorkflow
+from workflows.session_workflow import CommunisAgent
+from workflows.task_workflow import CommunisSubAgent
 
 TASK_QUEUE = "test-queue"
 
@@ -96,7 +96,7 @@ async def mock_call_claude_sub_agent(
     base_url: str = "",
     tools: list[dict] | None = None,
 ) -> dict:
-    """Mock LLM for sub-agent TaskWorkflow — completes immediately."""
+    """Mock LLM for sub-agent CommunisSubAgent — completes immediately."""
     return {
         "text": "Sub-agent done.",
         "stop_reason": "end_turn",
@@ -126,31 +126,31 @@ async def test_session_user_message_text_response(env):
     async with Worker(
         env.client,
         task_queue=TASK_QUEUE,
-        workflows=[SessionWorkflow, TaskWorkflow],
+        workflows=[CommunisAgent, CommunisSubAgent],
         activities=[mock_call_claude_text, mock_execute_run_command],
     ):
         handle = await env.client.start_workflow(
-            SessionWorkflow.run,
+            CommunisAgent.run,
             SessionConfig(),
             id="session-msg-1",
             task_queue=TASK_QUEUE,
         )
 
-        await handle.signal(SessionWorkflow.user_message, "Hello")
+        await handle.signal(CommunisAgent.user_message, "Hello")
 
         # Wait for response event
         for _attempt in range(50):
-            events = await handle.query(SessionWorkflow.get_events_since, 0)
+            events = await handle.query(CommunisAgent.get_events_since, 0)
             if any(e["event_type"] == "assistant_message" for e in events):
                 break
             await asyncio.sleep(0.2)
 
-        events = await handle.query(SessionWorkflow.get_events_since, 0)
+        events = await handle.query(CommunisAgent.get_events_since, 0)
         msg_events = [e for e in events if e["event_type"] == "assistant_message"]
         assert len(msg_events) >= 1
         assert "Hello" in msg_events[0]["data"]["text"]
 
-        await handle.signal(SessionWorkflow.end_session)
+        await handle.signal(CommunisAgent.end_session)
         result = await handle.result()
         assert result["status"] == "ended"
 
@@ -199,60 +199,60 @@ async def test_session_direct_tool_use_dangerous(env):
     async with Worker(
         env.client,
         task_queue=TASK_QUEUE,
-        workflows=[SessionWorkflow, TaskWorkflow],
+        workflows=[CommunisAgent, CommunisSubAgent],
         activities=[tool_call_claude, mock_execute_run_command],
     ):
         handle = await env.client.start_workflow(
-            SessionWorkflow.run,
+            CommunisAgent.run,
             SessionConfig(dangerous=True),
             id="session-tool-1",
             task_queue=TASK_QUEUE,
         )
 
-        await handle.signal(SessionWorkflow.user_message, "Show me README")
+        await handle.signal(CommunisAgent.user_message, "Show me README")
 
         for _attempt in range(50):
-            events = await handle.query(SessionWorkflow.get_events_since, 0)
+            events = await handle.query(CommunisAgent.get_events_since, 0)
             if any(e["event_type"] == "assistant_message" for e in events):
                 break
             await asyncio.sleep(0.2)
 
-        events = await handle.query(SessionWorkflow.get_events_since, 0)
+        events = await handle.query(CommunisAgent.get_events_since, 0)
         msg_events = [e for e in events if e["event_type"] == "assistant_message"]
         assert len(msg_events) >= 1
         assert "README" in msg_events[0]["data"]["text"]
         assert call_count == 2
 
-        await handle.signal(SessionWorkflow.end_session)
+        await handle.signal(CommunisAgent.end_session)
         await handle.result()
 
 
 @pytest.mark.asyncio
 async def test_session_delegation_spawns_task(env):
-    """Front agent delegates work via delegate_task tool, spawning a TaskWorkflow."""
+    """Front agent delegates work via delegate_task tool, spawning a CommunisSubAgent."""
     async with Worker(
         env.client,
         task_queue=TASK_QUEUE,
-        workflows=[SessionWorkflow, TaskWorkflow],
+        workflows=[CommunisAgent, CommunisSubAgent],
         activities=[mock_call_claude_delegate, mock_execute_run_command],
     ):
         handle = await env.client.start_workflow(
-            SessionWorkflow.run,
+            CommunisAgent.run,
             SessionConfig(),
             id="session-delegate-1",
             task_queue=TASK_QUEUE,
         )
 
-        await handle.signal(SessionWorkflow.user_message, "Do some complex work")
+        await handle.signal(CommunisAgent.user_message, "Do some complex work")
 
         # Wait for task_started event
         for _attempt in range(50):
-            events = await handle.query(SessionWorkflow.get_events_since, 0)
+            events = await handle.query(CommunisAgent.get_events_since, 0)
             if any(e["event_type"] == "task_started" for e in events):
                 break
             await asyncio.sleep(0.2)
 
-        events = await handle.query(SessionWorkflow.get_events_since, 0)
+        events = await handle.query(CommunisAgent.get_events_since, 0)
         started = [e for e in events if e["event_type"] == "task_started"]
         assert len(started) == 1
 
@@ -266,7 +266,7 @@ async def test_session_delegation_spawns_task(env):
         msg_events = [e for e in events if e["event_type"] == "assistant_message"]
         assert len(msg_events) >= 1
 
-        await handle.signal(SessionWorkflow.end_session)
+        await handle.signal(CommunisAgent.end_session)
         try:
             await handle.result()
         except Exception:
@@ -279,17 +279,17 @@ async def test_session_end_signal(env):
     async with Worker(
         env.client,
         task_queue=TASK_QUEUE,
-        workflows=[SessionWorkflow, TaskWorkflow],
+        workflows=[CommunisAgent, CommunisSubAgent],
         activities=[mock_call_claude_text, mock_execute_run_command],
     ):
         handle = await env.client.start_workflow(
-            SessionWorkflow.run,
+            CommunisAgent.run,
             SessionConfig(),
             id="session-end-1",
             task_queue=TASK_QUEUE,
         )
 
-        await handle.signal(SessionWorkflow.end_session)
+        await handle.signal(CommunisAgent.end_session)
         result = await handle.result()
 
         assert result["status"] == "ended"
@@ -301,36 +301,36 @@ async def test_session_multiple_messages(env):
     async with Worker(
         env.client,
         task_queue=TASK_QUEUE,
-        workflows=[SessionWorkflow, TaskWorkflow],
+        workflows=[CommunisAgent, CommunisSubAgent],
         activities=[mock_call_claude_text, mock_execute_run_command],
     ):
         handle = await env.client.start_workflow(
-            SessionWorkflow.run,
+            CommunisAgent.run,
             SessionConfig(),
             id="session-multi-1",
             task_queue=TASK_QUEUE,
         )
 
-        await handle.signal(SessionWorkflow.user_message, "First message")
+        await handle.signal(CommunisAgent.user_message, "First message")
 
         for _attempt in range(50):
-            events = await handle.query(SessionWorkflow.get_events_since, 0)
+            events = await handle.query(CommunisAgent.get_events_since, 0)
             if len([e for e in events if e["event_type"] == "assistant_message"]) >= 1:
                 break
             await asyncio.sleep(0.2)
 
-        await handle.signal(SessionWorkflow.user_message, "Second message")
+        await handle.signal(CommunisAgent.user_message, "Second message")
 
         for _attempt in range(50):
-            events = await handle.query(SessionWorkflow.get_events_since, 0)
+            events = await handle.query(CommunisAgent.get_events_since, 0)
             if len([e for e in events if e["event_type"] == "assistant_message"]) >= 2:
                 break
             await asyncio.sleep(0.2)
 
-        state = await handle.query(SessionWorkflow.get_state)
+        state = await handle.query(CommunisAgent.get_state)
         assert len(state["conversation"]) >= 4  # 2 user + 2 assistant
 
-        await handle.signal(SessionWorkflow.end_session)
+        await handle.signal(CommunisAgent.end_session)
         await handle.result()
 
 
@@ -340,39 +340,39 @@ async def test_session_get_events_since(env):
     async with Worker(
         env.client,
         task_queue=TASK_QUEUE,
-        workflows=[SessionWorkflow, TaskWorkflow],
+        workflows=[CommunisAgent, CommunisSubAgent],
         activities=[mock_call_claude_text, mock_execute_run_command],
     ):
         handle = await env.client.start_workflow(
-            SessionWorkflow.run,
+            CommunisAgent.run,
             SessionConfig(),
             id="session-events-1",
             task_queue=TASK_QUEUE,
         )
 
-        await handle.signal(SessionWorkflow.user_message, "Hello")
+        await handle.signal(CommunisAgent.user_message, "Hello")
 
         events: list[dict] = []
         for _attempt in range(50):
-            events = await handle.query(SessionWorkflow.get_events_since, 0)
+            events = await handle.query(CommunisAgent.get_events_since, 0)
             if events:
                 break
             await asyncio.sleep(0.2)
 
         first_event_id = events[0]["event_id"]
 
-        await handle.signal(SessionWorkflow.user_message, "World")
+        await handle.signal(CommunisAgent.user_message, "World")
 
         new_events: list[dict] = []
         for _attempt in range(50):
-            new_events = await handle.query(SessionWorkflow.get_events_since, first_event_id)
+            new_events = await handle.query(CommunisAgent.get_events_since, first_event_id)
             if new_events:
                 break
             await asyncio.sleep(0.2)
 
         assert all(e["event_id"] > first_event_id for e in new_events)
 
-        await handle.signal(SessionWorkflow.end_session)
+        await handle.signal(CommunisAgent.end_session)
         await handle.result()
 
 
@@ -420,22 +420,22 @@ async def test_session_direct_tool_approval_flow(env):
     async with Worker(
         env.client,
         task_queue=TASK_QUEUE,
-        workflows=[SessionWorkflow, TaskWorkflow],
+        workflows=[CommunisAgent, CommunisSubAgent],
         activities=[approval_claude, mock_execute_run_command],
     ):
         handle = await env.client.start_workflow(
-            SessionWorkflow.run,
+            CommunisAgent.run,
             SessionConfig(dangerous=False),
             id="session-approval-1",
             task_queue=TASK_QUEUE,
         )
 
-        await handle.signal(SessionWorkflow.user_message, "Run echo hello")
+        await handle.signal(CommunisAgent.user_message, "Run echo hello")
 
         # Wait for approval event
         approvals: list[dict] = []
         for _attempt in range(50):
-            approvals = await handle.query(SessionWorkflow.get_pending_approvals)
+            approvals = await handle.query(CommunisAgent.get_pending_approvals)
             if approvals:
                 break
             await asyncio.sleep(0.2)
@@ -444,19 +444,19 @@ async def test_session_direct_tool_approval_flow(env):
         approval_id = approvals[0]["approval_id"]
 
         # Approve
-        await handle.signal(SessionWorkflow.approval_response, [approval_id, True])
+        await handle.signal(CommunisAgent.approval_response, [approval_id, True])
 
         # Wait for completion
         for _attempt in range(50):
-            events = await handle.query(SessionWorkflow.get_events_since, 0)
+            events = await handle.query(CommunisAgent.get_events_since, 0)
             if any(e["event_type"] == "assistant_message" for e in events):
                 break
             await asyncio.sleep(0.2)
 
-        events = await handle.query(SessionWorkflow.get_events_since, 0)
+        events = await handle.query(CommunisAgent.get_events_since, 0)
         assert any(e["event_type"] == "approval_resolved" for e in events)
         assert any(e["event_type"] == "assistant_message" for e in events)
         assert call_count == 2  # tool_use + final text
 
-        await handle.signal(SessionWorkflow.end_session)
+        await handle.signal(CommunisAgent.end_session)
         await handle.result()

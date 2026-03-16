@@ -604,6 +604,11 @@ def main():
 
     # --- 'chat' subcommand ---
     chat_parser = subparsers.add_parser("chat", help="Start interactive session REPL")
+    chat_parser.add_argument(
+        "--user", "-u",
+        default="",
+        help="Username for workflow IDs (default: $USER env var)",
+    )
     _add_common_args(chat_parser)  # model defaults to "" → env DEFAULT_MODEL
 
     # --- 'run' subcommand (also default when positional arg is given) ---
@@ -643,6 +648,7 @@ def main():
         from cli.session_cli import run_session_cli
 
         asyncio.run(run_session_cli(
+            user=args.user,
             model=args.model,
             provider=args.provider,
             base_url=args.base_url,

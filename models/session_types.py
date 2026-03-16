@@ -29,6 +29,7 @@ class SessionConfig:
     directly (Temporal sandbox forbids it) — resolution happens in activities.
     """
 
+    user: str = ""  # username for workflow IDs (e.g. "andrew")
     model: str = ""  # "" = env DEFAULT_MODEL → DEFAULT_MODEL_STRING fallback
     provider: str = ""  # "" = env LLM_PROVIDER
     base_url: str = ""  # "" = env OPENAI_BASE_URL

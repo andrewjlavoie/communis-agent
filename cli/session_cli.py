@@ -21,7 +21,7 @@ from temporalio.client import Client
 
 from models.session_types import SessionConfig
 from shared.constants import TASK_QUEUE
-from workflows.session_workflow import SessionWorkflow
+from workflows.session_workflow import CommunisAgent
 
 POLL_INTERVAL = 0.5
 
@@ -29,7 +29,7 @@ console = Console()
 
 
 class SessionCLI:
-    """Interactive REPL that communicates with a SessionWorkflow via Temporal signals/queries."""
+    """Interactive REPL that communicates with a CommunisAgent via Temporal signals/queries."""
 
     def __init__(
         self,
@@ -48,10 +48,11 @@ class SessionCLI:
 
     async def run(self):
         """Start the session workflow and run input + poll loops concurrently."""
-        self.session_id = f"session-{uuid.uuid4().hex[:8]}"
+        user_part = f"-{self.config.user}" if self.config.user else ""
+        self.session_id = f"communis-agent{user_part}-{uuid.uuid4().hex[:8]}"
 
         self.handle = await self.client.start_workflow(
-            SessionWorkflow.run,
+            CommunisAgent.run,
             self.config,
             id=self.session_id,
             task_queue=TASK_QUEUE,
@@ -93,7 +94,7 @@ class SessionCLI:
 
         # End session
         try:
-            await self.handle.signal(SessionWorkflow.end_session)
+            await self.handle.signal(CommunisAgent.end_session)
             await self.handle.result()
         except Exception:
             pass
@@ -140,7 +141,7 @@ class SessionCLI:
                 approved = line.lower() in ("y", "yes")
                 approval_id = self._pending_approval["approval_id"]
                 await self.handle.signal(
-                    SessionWorkflow.approval_response,
+                    CommunisAgent.approval_response,
                     [approval_id, approved],
                 )
                 status = "[green]Approved[/green]" if approved else "[red]Denied[/red]"
@@ -149,7 +150,7 @@ class SessionCLI:
                 continue
 
             # Regular message
-            await self.handle.signal(SessionWorkflow.user_message, line)
+            await self.handle.signal(CommunisAgent.user_message, line)
 
     def _get_input(self) -> str | None:
         try:
@@ -163,7 +164,7 @@ class SessionCLI:
         while self.running:
             try:
                 events = await self.handle.query(
-                    SessionWorkflow.get_events_since,
+                    CommunisAgent.get_events_since,
                     self.last_event_id,
                 )
                 for event in events:
@@ -267,7 +268,7 @@ class SessionCLI:
             ))
 
         elif cmd == "/tasks":
-            state = await self.handle.query(SessionWorkflow.get_state)
+            state = await self.handle.query(CommunisAgent.get_state)
             tasks = state.get("tasks", {})
             if not tasks:
                 console.print("[dim]No tasks.[/dim]")
@@ -304,7 +305,7 @@ class SessionCLI:
                 console.print("[dim]Usage: /task <task-id>[/dim]")
                 return
             task_id_prefix = parts[1].strip()
-            state = await self.handle.query(SessionWorkflow.get_state)
+            state = await self.handle.query(CommunisAgent.get_state)
             tasks = state.get("tasks", {})
             matches = [t for tid, t in tasks.items() if tid.startswith(task_id_prefix)]
             if not matches:
@@ -329,7 +330,7 @@ class SessionCLI:
                 console.print("[dim]Usage: /cancel <task-id>[/dim]")
                 return
             task_id_prefix = parts[1].strip()
-            state = await self.handle.query(SessionWorkflow.get_state)
+            state = await self.handle.query(CommunisAgent.get_state)
             tasks = state.get("tasks", {})
             matches = [(tid, t) for tid, t in tasks.items() if tid.startswith(task_id_prefix)]
             if not matches:
@@ -349,6 +350,7 @@ class SessionCLI:
 
 async def run_session_cli(
     *,
+    user: str = "",
     model: str = "",
     provider: str = "",
     base_url: str = "",
@@ -373,6 +375,7 @@ async def run_session_cli(
 
     # Pass through as-is. Empty string = env default, resolved in activities.
     config = SessionConfig(
+        user=user or os.getenv("USER", ""),
         model=model,
         provider=provider,
         base_url=base_url,
