@@ -155,7 +155,7 @@ class SessionCLI:
     def _get_input(self) -> str | None:
         try:
             if self._pending_approval:
-                return input("[y/n] > ")
+                return input("[y/n or message] > ")
             return input("> ")
         except (EOFError, KeyboardInterrupt):
             return None
