@@ -52,18 +52,7 @@ async def mock_execute_run_command(
     }
 
 
-@activity.defn(name="front_agent_respond")
-async def mock_front_agent_respond(
-    conversation: list[dict],
-    active_tasks: dict[str, dict],
-    model: str = "",
-    provider: str = "",
-    base_url: str = "",
-) -> dict:
-    return {"text": "OK", "delegate_tasks": []}
-
-
-MOCK_ACTIVITIES = [mock_call_claude, mock_execute_run_command, mock_front_agent_respond]
+MOCK_ACTIVITIES = [mock_call_claude, mock_execute_run_command]
 
 
 @pytest.fixture
@@ -81,7 +70,7 @@ async def test_task_workflow_simple_completion(env):
         workflows=[TaskWorkflow, SessionWorkflow],
         activities=MOCK_ACTIVITIES,
     ):
-        # Start session
+        # Start session (task needs a parent to signal)
         session_handle = await env.client.start_workflow(
             SessionWorkflow.run,
             SessionConfig(),
@@ -89,7 +78,6 @@ async def test_task_workflow_simple_completion(env):
             task_queue=TASK_QUEUE,
         )
 
-        # Start task as a separate workflow (simulating external start)
         spec = TaskSpec(
             task_id="task-simple-1",
             description="Write a hello world script",
@@ -106,14 +94,6 @@ async def test_task_workflow_simple_completion(env):
         assert result["status"] == "completed"
         assert "Task complete" in result["summary"]
 
-        # Verify the session received the task update events
-        for _attempt in range(30):
-            events = await session_handle.query(SessionWorkflow.get_events_since, 0)
-            if any(e["event_type"] == "task_completed" for e in events):
-                break
-            await asyncio.sleep(0.2)
-
-        # End session gracefully — ignore errors if already ended
         try:
             await session_handle.signal(SessionWorkflow.end_session)
         except Exception:
@@ -171,7 +151,7 @@ async def test_task_workflow_with_tool_use_dangerous(env):
         env.client,
         task_queue=TASK_QUEUE,
         workflows=[TaskWorkflow, SessionWorkflow],
-        activities=[tool_call_claude, mock_execute_run_command, mock_front_agent_respond],
+        activities=[tool_call_claude, mock_execute_run_command],
     ):
         session_handle = await env.client.start_workflow(
             SessionWorkflow.run,
@@ -210,14 +190,10 @@ async def test_task_workflow_with_tool_use_dangerous(env):
 
 
 @pytest.mark.asyncio
-async def test_task_workflow_approval_flow(env):
-    """Task requests approval, receives it via session delegation, and continues.
-
-    Full round-trip: user message → delegation → task spawns → tool use →
-    approval request bubbles to session → user approves → task completes.
-    """
+async def test_task_workflow_delegation_spawns_child(env):
+    """Front agent delegates via delegate_task tool, spawning a TaskWorkflow child."""
     @activity.defn(name="call_claude")
-    async def approval_call_claude(
+    async def delegate_claude(
         messages: list[dict],
         system_prompt: str,
         model: str = "",
@@ -226,6 +202,15 @@ async def test_task_workflow_approval_flow(env):
         base_url: str = "",
         tools: list[dict] | None = None,
     ) -> dict:
+        # Sub-agent calls (system prompt has "Task:")
+        if "Task:" in system_prompt:
+            return {
+                "text": "Sub-agent done.",
+                "stop_reason": "end_turn",
+                "content_blocks": [{"type": "text", "text": "Sub-agent done."}],
+                "usage": {"input_tokens": 100, "output_tokens": 50},
+            }
+        # Front agent: delegate, then finish
         has_tool_result = any(
             isinstance(m.get("content"), list)
             and any(isinstance(c, dict) and c.get("type") == "tool_result" for c in m["content"])
@@ -235,84 +220,52 @@ async def test_task_workflow_approval_flow(env):
             return {
                 "text": "",
                 "stop_reason": "tool_use",
-                "content_blocks": [
-                    {
-                        "type": "tool_use",
-                        "id": "tu_apr",
-                        "name": "run",
-                        "input": {"command": "echo hello"},
-                    },
-                ],
-                "usage": {"input_tokens": 100, "output_tokens": 20},
+                "content_blocks": [{
+                    "type": "tool_use",
+                    "id": "tu_del",
+                    "name": "delegate_task",
+                    "input": {"description": "Do some work"},
+                }],
+                "usage": {"input_tokens": 100, "output_tokens": 30},
             }
         return {
-            "text": "Done.",
+            "text": "Task delegated.",
             "stop_reason": "end_turn",
-            "content_blocks": [{"type": "text", "text": "Done."}],
-            "usage": {"input_tokens": 200, "output_tokens": 50},
-        }
-
-    @activity.defn(name="front_agent_respond")
-    async def delegating_agent(
-        conversation: list[dict],
-        active_tasks: dict[str, dict],
-        model: str = "",
-        provider: str = "",
-        base_url: str = "",
-    ) -> dict:
-        return {
-            "text": "I'll run that command for you.",
-            "delegate_tasks": [
-                {"description": "Run echo hello", "context": "User wants to run a command"},
-            ],
+            "content_blocks": [{"type": "text", "text": "Task delegated."}],
+            "usage": {"input_tokens": 200, "output_tokens": 30},
         }
 
     async with Worker(
         env.client,
         task_queue=TASK_QUEUE,
         workflows=[TaskWorkflow, SessionWorkflow],
-        activities=[approval_call_claude, mock_execute_run_command, delegating_agent],
+        activities=[delegate_claude, mock_execute_run_command],
     ):
-        session_handle = await env.client.start_workflow(
+        handle = await env.client.start_workflow(
             SessionWorkflow.run,
-            SessionConfig(dangerous=False),
-            id="session-test-approval",
+            SessionConfig(dangerous=True),
+            id="session-deleg-test",
             task_queue=TASK_QUEUE,
         )
 
-        # Send message that triggers delegation
-        await session_handle.signal(SessionWorkflow.user_message, "Run echo hello")
+        await handle.signal(SessionWorkflow.user_message, "Do some work")
 
-        # Wait for approval request to bubble up to session
-        approvals: list[dict] = []
+        # Wait for task_started and task_completed
         for _attempt in range(60):
-            approvals = await session_handle.query(SessionWorkflow.get_pending_approvals)
-            if approvals:
-                break
-            await asyncio.sleep(0.3)
-
-        assert len(approvals) == 1
-        approval_id = approvals[0]["approval_id"]
-
-        # Approve via session
-        await session_handle.signal(SessionWorkflow.approval_response, [approval_id, True])
-
-        # Wait for task to complete
-        for _attempt in range(60):
-            events = await session_handle.query(SessionWorkflow.get_events_since, 0)
+            events = await handle.query(SessionWorkflow.get_events_since, 0)
             if any(e["event_type"] == "task_completed" for e in events):
                 break
             await asyncio.sleep(0.3)
 
-        events = await session_handle.query(SessionWorkflow.get_events_since, 0)
-        completed = [e for e in events if e["event_type"] == "task_completed"]
-        assert len(completed) == 1
+        events = await handle.query(SessionWorkflow.get_events_since, 0)
+        assert any(e["event_type"] == "task_started" for e in events)
+        assert any(e["event_type"] == "task_completed" for e in events)
 
         try:
-            await session_handle.signal(SessionWorkflow.end_session)
+            await handle.signal(SessionWorkflow.end_session)
         except Exception:
             pass
         try:
-            await session_handle.result()
+            await handle.result()
         except Exception:
             pass

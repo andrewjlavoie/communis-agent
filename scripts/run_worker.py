@@ -18,7 +18,6 @@ from activities.llm_activities import (  # noqa: E402
     summarize_subcommunis_results,
     validate_user_feedback,
 )
-from activities.session_activities import front_agent_respond  # noqa: E402
 from activities.tool_activities import execute_run_command  # noqa: E402
 from activities.workspace_activities import (  # noqa: E402
     collect_older_turns_text,
@@ -61,8 +60,6 @@ async def main():
             summarize_artifacts,
             summarize_subcommunis_results,
             validate_user_feedback,
-            # Session activities
-            front_agent_respond,
             # Tool activities
             execute_run_command,
             # Workspace activities
