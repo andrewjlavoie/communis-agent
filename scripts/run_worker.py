@@ -13,6 +13,7 @@ from activities.llm_activities import (
     summarize_subcommunis_results,
     validate_user_feedback,
 )
+from activities.session_activities import front_agent_respond
 from activities.tool_activities import execute_run_command
 from activities.workspace_activities import (
     collect_older_turns_text,
@@ -27,6 +28,8 @@ from activities.workspace_activities import (
 from shared.constants import TASK_QUEUE
 from workflows.communis_orchestrator import CommunisOrchestratorWorkflow
 from workflows.communis_turn import CommunisTurnWorkflow
+from workflows.session_workflow import SessionWorkflow
+from workflows.task_workflow import TaskWorkflow
 
 
 async def main():
@@ -40,7 +43,12 @@ async def main():
     worker = Worker(
         client,
         task_queue=TASK_QUEUE,
-        workflows=[CommunisOrchestratorWorkflow, CommunisTurnWorkflow],
+        workflows=[
+            CommunisOrchestratorWorkflow,
+            CommunisTurnWorkflow,
+            SessionWorkflow,
+            TaskWorkflow,
+        ],
         activities=[
             # LLM activities
             call_claude,
@@ -49,6 +57,8 @@ async def main():
             summarize_artifacts,
             summarize_subcommunis_results,
             validate_user_feedback,
+            # Session activities
+            front_agent_respond,
             # Tool activities
             execute_run_command,
             # Workspace activities

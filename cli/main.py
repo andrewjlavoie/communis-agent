@@ -561,28 +561,23 @@ def _prompt_for_feedback() -> str | None:
     return feedback if feedback else None
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="communis — Self-Directing Iterative Work Loop"
-    )
-    parser.add_argument("idea", metavar="prompt", help="The prompt or task to work on")
+def _add_common_args(parser: argparse.ArgumentParser, model_default: str = ""):
+    """Add args shared between 'run' and 'chat' subcommands.
+
+    model_default: for 'run', pass DEFAULT_MODEL_STRING for backward compat.
+                   for 'chat', pass "" so env DEFAULT_MODEL is used.
+    """
+    help_text = "LLM model (default: env DEFAULT_MODEL or claude-sonnet-4-5-20250929)"
+    if model_default:
+        help_text = f"Claude model to use (default: {model_default})"
     parser.add_argument(
-        "--turns", "-t", type=int, default=0,
-        help="Max steps (0 = indefinite with goal detection, default: 0)",
-    )
-    parser.add_argument(
-        "--model",
-        "-m",
-        default=DEFAULT_MODEL_STRING,
-        help=f"Claude model to use (default: {DEFAULT_MODEL_STRING})",
-    )
-    parser.add_argument(
-        "--auto", "-a", action="store_true",
-        help="Skip all feedback prompts and run straight through",
+        "--model", "-m",
+        default=model_default,
+        help=help_text,
     )
     parser.add_argument(
         "--verbose", "-v", action="store_true",
-        help="Show detailed progress: timing, file paths, token breakdown, and session summary table",
+        help="Show detailed progress",
     )
     parser.add_argument(
         "--provider", "-p",
@@ -595,27 +590,87 @@ def main():
         help="Base URL for OpenAI-compatible API (overrides OPENAI_BASE_URL env var)",
     )
     parser.add_argument(
-        "--output", "-o",
-        default="",
-        help="Save session output to a markdown file (e.g. --output result.md)",
-    )
-    parser.add_argument(
         "--dangerous",
         action="store_true",
         help="Auto-approve all tool calls without human confirmation (use with caution!)",
     )
-    parser.add_argument(
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="communis — Self-Directing Iterative Work Loop"
+    )
+    subparsers = parser.add_subparsers(dest="command")
+
+    # --- 'chat' subcommand ---
+    chat_parser = subparsers.add_parser("chat", help="Start interactive session REPL")
+    _add_common_args(chat_parser)  # model defaults to "" → env DEFAULT_MODEL
+
+    # --- 'run' subcommand (also default when positional arg is given) ---
+    # For backward compatibility, we support both `communis run "prompt"` and `communis "prompt"`
+    run_parser = subparsers.add_parser("run", help="Run a single-shot task (default)")
+    run_parser.add_argument("idea", metavar="prompt", help="The prompt or task to work on")
+    _add_common_args(run_parser, model_default=DEFAULT_MODEL_STRING)
+    run_parser.add_argument(
+        "--turns", "-t", type=int, default=0,
+        help="Max steps (0 = indefinite with goal detection, default: 0)",
+    )
+    run_parser.add_argument(
+        "--auto", "-a", action="store_true",
+        help="Skip all feedback prompts and run straight through",
+    )
+    run_parser.add_argument(
+        "--output", "-o",
+        default="",
+        help="Save session output to a markdown file (e.g. --output result.md)",
+    )
+    run_parser.add_argument(
         "--no-goal-detect",
         action="store_true",
         help="Disable goal completion detection (requires --turns > 0)",
     )
-    parser.add_argument(
+    run_parser.add_argument(
         "--max-subcommunis",
         type=int,
         default=3,
         help="Max parallel subcommunis (0 = disabled, default: 3, max: 5)",
     )
+
+    # Parse args — handle backward compatibility (no subcommand = 'run')
     args = parser.parse_args()
+
+    if args.command == "chat":
+        from cli.session_cli import run_session_cli
+
+        asyncio.run(run_session_cli(
+            model=args.model,
+            provider=args.provider,
+            base_url=args.base_url,
+            dangerous=args.dangerous,
+            verbose=args.verbose,
+        ))
+        return
+
+    if args.command == "run":
+        idea = args.idea
+    elif args.command is None:
+        # Backward compatibility: if no subcommand, treat first positional as idea
+        # Re-parse with the old-style parser
+        legacy_parser = argparse.ArgumentParser(
+            description="communis — Self-Directing Iterative Work Loop"
+        )
+        legacy_parser.add_argument("idea", metavar="prompt", help="The prompt or task to work on")
+        _add_common_args(legacy_parser, model_default=DEFAULT_MODEL_STRING)
+        legacy_parser.add_argument("--turns", "-t", type=int, default=0)
+        legacy_parser.add_argument("--auto", "-a", action="store_true")
+        legacy_parser.add_argument("--output", "-o", default="")
+        legacy_parser.add_argument("--no-goal-detect", action="store_true")
+        legacy_parser.add_argument("--max-subcommunis", type=int, default=3)
+        args = legacy_parser.parse_args()
+        idea = args.idea
+    else:
+        parser.print_help()
+        return
 
     # Validation
     if args.no_goal_detect and args.turns <= 0:
@@ -626,7 +681,7 @@ def main():
     goal_detect = not args.no_goal_detect
 
     asyncio.run(run_cli(
-        args.idea,
+        idea,
         max_turns=args.turns,
         model=args.model,
         auto=args.auto,
