@@ -85,6 +85,12 @@ class CommunisAgent:
         self.approval_responses.append((approval_id, approved))
 
     @workflow.signal
+    async def clear_conversation(self):
+        """Signal from CLI: clear conversation history, start fresh."""
+        self.state.conversation.clear()
+        self._add_event("conversation_cleared", {})
+
+    @workflow.signal
     async def end_session(self):
         """Signal from CLI: user wants to end the session."""
         self.should_exit = True

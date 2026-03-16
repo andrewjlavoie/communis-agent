@@ -246,6 +246,9 @@ class SessionCLI:
             status = "[green]approved[/green]" if approved else "[red]denied[/red]"
             console.print(f"[dim]Approval {status}[/dim]")
 
+        elif event_type == "conversation_cleared":
+            pass  # Already printed by /clear handler
+
         elif event_type == "session_ended":
             pass  # Handled by main loop
 
@@ -258,9 +261,11 @@ class SessionCLI:
 
         elif cmd == "/help":
             console.print(Panel(
+                "[bold]/clear[/bold] — Clear conversation history (start fresh, keep tasks)\n"
                 "[bold]/tasks[/bold] — List all tasks\n"
                 "[bold]/task <id>[/bold] — Show task details\n"
                 "[bold]/cancel <id>[/bold] — Cancel a running task\n"
+                "[bold]/status[/bold] — Show session info\n"
                 "[bold]/quit[/bold] — End session\n"
                 "[bold]/help[/bold] — Show this help",
                 title="Commands",
@@ -343,6 +348,29 @@ class SessionCLI:
                 console.print(f"[yellow]Cancel request sent to {task_id[:12]}[/yellow]")
             except Exception as e:
                 console.print(f"[red]Failed to cancel: {e}[/red]")
+
+        elif cmd == "/clear":
+            await self.handle.signal(CommunisAgent.clear_conversation)
+            console.print("[dim]Conversation cleared.[/dim]\n")
+
+        elif cmd == "/status":
+            state = await self.handle.query(CommunisAgent.get_state)
+            n_msgs = len(state.get("conversation", []))
+            n_tasks = len(state.get("tasks", {}))
+            n_active = len([
+                t for t in state.get("tasks", {}).values()
+                if t.get("status") in ("pending", "running", "waiting_approval")
+            ])
+            n_events = state.get("event_counter", 0)
+            console.print(Panel(
+                f"[bold]Session:[/bold] {self.session_id}\n"
+                f"[bold]Status:[/bold] {state.get('status', 'unknown')}\n"
+                f"[bold]Messages:[/bold] {n_msgs}\n"
+                f"[bold]Tasks:[/bold] {n_tasks} total, {n_active} active\n"
+                f"[bold]Events:[/bold] {n_events}",
+                title="Session Info",
+                border_style="dim",
+            ))
 
         else:
             console.print(f"[dim]Unknown command: {cmd}. Type /help for available commands.[/dim]")
