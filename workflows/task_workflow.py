@@ -279,9 +279,22 @@ class TaskWorkflow:
 
             messages.append({"role": "user", "content": tool_results})
 
-        # Build result summary
+        # Build result summary — prefer LLM text, fall back to last tool results
         content = "\n\n".join(final_text_parts) if final_text_parts else ""
-        summary = content[:2000] if content else "Task completed with no text output."
+        if not content:
+            # LLM never produced text (just tool calls). Extract the last tool
+            # results from the conversation so the user sees what happened.
+            for msg in reversed(messages):
+                if isinstance(msg.get("content"), list):
+                    for block in msg["content"]:
+                        if isinstance(block, dict) and block.get("type") == "tool_result":
+                            result_text = block.get("content", "")
+                            if result_text and not result_text.startswith("[error]"):
+                                content = result_text
+                                break
+                if content:
+                    break
+        summary = content[:2000] if content else "Task completed but produced no output."
 
         self.status = "completed"
         self.progress = "Done"

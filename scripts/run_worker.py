@@ -2,10 +2,15 @@ import asyncio
 import os
 
 from dotenv import load_dotenv
-from temporalio.client import Client
-from temporalio.worker import Worker
 
-from activities.llm_activities import (
+# Load .env BEFORE any imports that read os.getenv() at module level
+# (llm_activities reads LLM_PROVIDER, DEFAULT_MODEL, etc. on import)
+load_dotenv()
+
+from temporalio.client import Client  # noqa: E402
+from temporalio.worker import Worker  # noqa: E402
+
+from activities.llm_activities import (  # noqa: E402
     call_claude,
     extract_key_insights,
     plan_next_turn,
@@ -13,9 +18,9 @@ from activities.llm_activities import (
     summarize_subcommunis_results,
     validate_user_feedback,
 )
-from activities.session_activities import front_agent_respond
-from activities.tool_activities import execute_run_command
-from activities.workspace_activities import (
+from activities.session_activities import front_agent_respond  # noqa: E402
+from activities.tool_activities import execute_run_command  # noqa: E402
+from activities.workspace_activities import (  # noqa: E402
     collect_older_turns_text,
     init_workspace,
     read_turn_context,
@@ -25,15 +30,14 @@ from activities.workspace_activities import (
     write_turn_artifact,
     write_workspace_summary,
 )
-from shared.constants import TASK_QUEUE
-from workflows.communis_orchestrator import CommunisOrchestratorWorkflow
-from workflows.communis_turn import CommunisTurnWorkflow
-from workflows.session_workflow import SessionWorkflow
-from workflows.task_workflow import TaskWorkflow
+from shared.constants import TASK_QUEUE  # noqa: E402
+from workflows.communis_orchestrator import CommunisOrchestratorWorkflow  # noqa: E402
+from workflows.communis_turn import CommunisTurnWorkflow  # noqa: E402
+from workflows.session_workflow import SessionWorkflow  # noqa: E402
+from workflows.task_workflow import TaskWorkflow  # noqa: E402
 
 
 async def main():
-    load_dotenv()
 
     address = os.getenv("TEMPORAL_ADDRESS", "localhost:7233")
     namespace = os.getenv("TEMPORAL_NAMESPACE", "default")

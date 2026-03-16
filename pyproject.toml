@@ -20,6 +20,9 @@ dev = [
     "pytest-asyncio>=0.24.0",
 ]
 
+[project.scripts]
+communis = "cli.main:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

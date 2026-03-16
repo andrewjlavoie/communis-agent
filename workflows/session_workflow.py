@@ -185,6 +185,13 @@ class SessionWorkflow:
         description = task_def.get("description", "")
         context = task_def.get("context", "")
 
+        # If LLM didn't provide context, build it from recent conversation
+        if not context:
+            recent = self.state.conversation[-6:]  # last 3 exchanges
+            context = "\n".join(
+                f"{msg['role']}: {msg['content']}" for msg in recent
+            )
+
         spec = TaskSpec(
             task_id=task_id,
             description=description,
