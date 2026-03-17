@@ -186,13 +186,81 @@ Turn files have YAML frontmatter (role, key insights, token usage) and the full 
 
 ## Tool System
 
-### `run` — Shell Command Execution
+Tools are how the LLM takes action beyond generating text. Each tool is a JSON schema definition (so the LLM knows what it can call and how) paired with an execution handler in the workflow. When the LLM returns a `tool_use` block, the workflow dispatches it to the matching handler, runs it as a Temporal activity, and feeds the result back to the LLM for the next iteration.
 
-Both modes share the `run` tool for executing shell commands. Every call goes through an approval gate unless `--dangerous` is set.
+### Current Tools
 
-### `delegate_task` — Background Sub-Agents (Chat Mode)
+#### `run` — Shell Command Execution
 
-The front agent can spawn sub-agents for complex multi-step work. Each sub-agent runs as a CommunisSubAgent child workflow with its own LLM + tool loop, approval propagation, and progress reporting.
+Both modes share the `run` tool (`tools/run_tool.py`). It gives the agent full Unix shell access — pipes, chaining, redirection, all standard CLI tools. The implementation has two layers:
+
+- **Execution layer** — `asyncio.create_subprocess_shell` with configurable timeout (default 120s)
+- **Presentation layer** — binary detection, overflow truncation (200 lines / 50KB), stderr attachment, and a metadata footer so the LLM knows exit code and duration
+
+Every call goes through an approval gate (human confirms `y`/`n`) unless `--dangerous` is set.
+
+**Why a single `run` tool instead of separate `read_file`, `write_file`, `grep`, etc.?** Unix already has composable tools for all of those. A single shell tool avoids duplicating that surface area in custom tool definitions and lets the LLM compose commands naturally (`cat file.txt | grep ERROR | wc -l`).
+
+#### `delegate_task` — Background Sub-Agents (Chat Mode Only)
+
+Defined in `tools/delegate_tool.py`. The front agent can spawn a background sub-agent (`CommunisSubAgent`) as a child Temporal workflow. Each sub-agent gets its own LLM + tool loop, approval propagation, and progress reporting. Use this for multi-step work that shouldn't block the conversation.
+
+The `run` mode doesn't use `delegate_task` — it has its own multi-turn orchestration via `CommunisOrchestratorWorkflow`.
+
+### Adding a New Tool
+
+Three steps: define the schema, implement the handler, and wire it into the workflow.
+
+**1. Define the tool schema** — Create a file in `tools/` with a Claude-compatible tool definition:
+
+```python
+# tools/my_tool.py
+MY_TOOL_DEFINITION = {
+    "name": "my_tool",
+    "description": (
+        "What this tool does, when the LLM should use it, "
+        "and any constraints. Be detailed — the LLM uses this "
+        "description to decide when and how to call the tool."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "param": {
+                "type": "string",
+                "description": "What this parameter is for.",
+            },
+        },
+        "required": ["param"],
+    },
+}
+```
+
+**2. Add a handler in the workflow** — In the workflow that should have access to the tool (e.g., `workflows/session_workflow.py` for chat mode, `workflows/communis_turn.py` for run mode), add the tool definition to the `tools` list and add a dispatch branch:
+
+```python
+# In the workflow's unsafe imports block:
+from tools.my_tool import MY_TOOL_DEFINITION
+
+# Add to the tools list passed to the LLM:
+tools = [RUN_TOOL_DEFINITION, DELEGATE_TASK_TOOL, MY_TOOL_DEFINITION]
+
+# Add a dispatch branch in the tool processing loop:
+elif tool_name == "my_tool":
+    result = await self._handle_my_tool(tool_use_id, tool_input)
+    tool_results.append(result)
+```
+
+**3. Implement execution** — If your tool needs I/O or external calls, implement it as a Temporal activity (in `activities/`) so it gets retry policies and durable execution. If it's pure computation, you can run it inline in the workflow handler. Return a `tool_result` dict:
+
+```python
+{
+    "type": "tool_result",
+    "tool_use_id": tool_use_id,
+    "content": "result string for the LLM",
+}
+```
+
+Don't forget to register any new activities in `scripts/run_worker.py`.
 
 ## Composability
 
