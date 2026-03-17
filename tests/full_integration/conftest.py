@@ -119,6 +119,18 @@ BACKENDS = {
         },
         "skip_check": lambda: _check_openai_endpoint("http://192.168.5.71:1234/v1"),
     },
+    "gemini": {
+        "provider": "gemini",
+        "model": "gemini-2.5-flash-lite-preview",
+        "fast_model": "gemini-2.5-flash-lite-preview",
+        "fast_max_tokens": 0,
+        "base_url": "",
+        "env_overrides": {},
+        "skip_check": lambda: (
+            not os.getenv("GOOGLE_API_KEY"),
+            "GOOGLE_API_KEY not set",
+        ),
+    },
 }
 
 
@@ -164,6 +176,7 @@ def configure_llm_backend(model_backend):
         "fast_max_tokens": mod.FAST_MAX_TOKENS,
         "anthropic_client": mod._anthropic_client,
         "openai_clients": mod._openai_clients.copy(),
+        "gemini_client": mod._gemini_client,
     }
     saved_env: dict[str, str | None] = {}
 
@@ -173,6 +186,7 @@ def configure_llm_backend(model_backend):
     mod.FAST_MAX_TOKENS = model_backend["fast_max_tokens"]
     mod._anthropic_client = None
     mod._openai_clients.clear()
+    mod._gemini_client = None
 
     for key, val in model_backend["env_overrides"].items():
         saved_env[key] = os.environ.get(key)
@@ -186,6 +200,7 @@ def configure_llm_backend(model_backend):
     mod.FAST_MAX_TOKENS = saved["fast_max_tokens"]
     mod._anthropic_client = saved["anthropic_client"]
     mod._openai_clients = saved["openai_clients"]
+    mod._gemini_client = saved["gemini_client"]
 
     for key, original in saved_env.items():
         if original is None:

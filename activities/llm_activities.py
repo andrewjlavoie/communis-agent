@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import uuid
 
 from temporalio import activity
 
@@ -59,6 +60,19 @@ def _get_openai_client(base_url: str = ""):
     return _openai_clients[base_url]
 
 
+# --- Gemini client ---
+_gemini_client = None
+
+
+def _get_gemini_client():
+    global _gemini_client
+    if _gemini_client is None:
+        from google import genai
+
+        _gemini_client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY", ""))
+    return _gemini_client
+
+
 # --- Unified LLM call ---
 
 
@@ -82,6 +96,8 @@ async def _call_llm(
     provider = (provider or LLM_PROVIDER).strip().lower()
     if provider == "openai":
         return await _call_openai(messages, system_prompt, model, max_tokens, base_url, tools)
+    if provider == "gemini":
+        return await _call_gemini(messages, system_prompt, model, max_tokens, tools)
     return await _call_anthropic(messages, system_prompt, model, max_tokens, tools)
 
 
@@ -222,7 +238,7 @@ async def _call_openai(
     if hasattr(choice.message, "reasoning_content") and choice.message.reasoning_content:
         reasoning = choice.message.reasoning_content.strip()
 
-    # Strip <think>...</think> blocks from thinking models
+    # Strip <think>...</think> blocks from thinking models (Qwen3, etc.)
     text = _THINK_RE.sub("", text).strip()
 
     # If content is empty but reasoning exists, salvage it so downstream
@@ -264,6 +280,180 @@ async def _call_openai(
             "input_tokens": usage.prompt_tokens if usage else 0,
             "output_tokens": usage.completion_tokens if usage else 0,
         },
+    }
+
+
+def _find_tool_name_for_id(messages: list[dict], tool_use_id: str) -> str:
+    """Scan messages backwards to find the tool name for a given tool_use_id.
+
+    Needed because Gemini's Part.from_function_response() requires the function
+    name, but our internal tool_result format only carries tool_use_id.
+    """
+    for msg in reversed(messages):
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            for block in content:
+                if block.get("type") == "tool_use" and block.get("id") == tool_use_id:
+                    return block.get("name", "unknown")
+    return "unknown"
+
+
+def _convert_messages_to_gemini(messages: list[dict]) -> list:
+    """Convert internal Anthropic-format messages to Gemini Content objects.
+
+    Mapping:
+    - role="assistant" → role="model"
+    - tool_use blocks → Part.from_function_call()
+    - tool_result blocks → Part.from_function_response()
+    - Plain text → Part.from_text()
+    """
+    from google.genai import types
+
+    contents: list = []
+    for msg in messages:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+        gemini_role = "model" if role == "assistant" else "user"
+
+        if isinstance(content, str):
+            contents.append(
+                types.Content(role=gemini_role, parts=[types.Part.from_text(text=content)])
+            )
+        elif isinstance(content, list):
+            parts = []
+            for block in content:
+                block_type = block.get("type", "")
+                if block_type == "text":
+                    parts.append(types.Part.from_text(text=block.get("text", "")))
+                elif block_type == "tool_use":
+                    parts.append(
+                        types.Part.from_function_call(
+                            name=block["name"],
+                            args=block.get("input", {}),
+                        )
+                    )
+                elif block_type == "tool_result":
+                    tool_name = _find_tool_name_for_id(messages, block["tool_use_id"])
+                    result_content = block.get("content", "")
+                    parts.append(
+                        types.Part.from_function_response(
+                            name=tool_name,
+                            response={"result": result_content},
+                        )
+                    )
+            if parts:
+                contents.append(types.Content(role=gemini_role, parts=parts))
+    return contents
+
+
+def _convert_tools_to_gemini(tools: list[dict]):
+    """Convert internal tool definitions to Gemini Tool format.
+
+    Maps input_schema → parameters (same JSON Schema format).
+    """
+    from google.genai import types
+
+    declarations = []
+    for t in tools:
+        declarations.append(
+            types.FunctionDeclaration(
+                name=t["name"],
+                description=t.get("description", ""),
+                parameters=t.get("input_schema", {}),
+            )
+        )
+    return types.Tool(function_declarations=declarations)
+
+
+async def _call_gemini(
+    messages: list[dict],
+    system_prompt: str,
+    model: str,
+    max_tokens: int,
+    tools: list[dict] | None = None,
+) -> dict:
+    """Call Google Gemini API and return normalized response."""
+    from google.genai import types
+
+    client = _get_gemini_client()
+
+    contents = _convert_messages_to_gemini(messages)
+
+    config_kwargs: dict = {
+        "system_instruction": system_prompt,
+        "max_output_tokens": max_tokens,
+    }
+    if tools:
+        config_kwargs["tools"] = [_convert_tools_to_gemini(tools)]
+        config_kwargs["automatic_function_calling"] = types.AutomaticFunctionCallingConfig(
+            disable=True,
+        )
+
+    config = types.GenerateContentConfig(**config_kwargs)
+
+    response = await client.aio.models.generate_content(
+        model=model,
+        contents=contents,
+        config=config,
+    )
+
+    # Normalize response
+    text = ""
+    reasoning = ""
+    content_blocks: list[dict] = []
+
+    if response.candidates and response.candidates[0].content:
+        reasoning_parts: list[str] = []
+        for part in response.candidates[0].content.parts:
+            if part.function_call:
+                call_id = f"gemini_{uuid.uuid4().hex[:12]}"
+                # Convert args from proto MapComposite to a plain dict
+                args = dict(part.function_call.args) if part.function_call.args else {}
+                content_blocks.append({
+                    "type": "tool_use",
+                    "id": call_id,
+                    "name": part.function_call.name,
+                    "input": args,
+                })
+            elif part.text:
+                # Capture <think>...</think> inner content before stripping
+                think_matches = re.findall(r"<think>(.*?)</think>", part.text, re.DOTALL)
+                reasoning_parts.extend(m.strip() for m in think_matches)
+                cleaned = _THINK_RE.sub("", part.text).strip()
+                if cleaned:
+                    text += cleaned
+                    content_blocks.append({"type": "text", "text": cleaned})
+        reasoning = "\n".join(reasoning_parts).strip()
+
+    # Determine stop reason
+    has_tool_calls = any(b["type"] == "tool_use" for b in content_blocks)
+    if has_tool_calls:
+        stop_reason = "tool_use"
+    elif response.candidates:
+        finish = response.candidates[0].finish_reason
+        # finish_reason is an enum; compare by name
+        finish_name = finish.name if hasattr(finish, "name") else str(finish)
+        stop_reason_map = {
+            "STOP": "end_turn",
+            "MAX_TOKENS": "max_tokens",
+        }
+        stop_reason = stop_reason_map.get(finish_name, "end_turn")
+    else:
+        stop_reason = "end_turn"
+
+    # Usage
+    usage_meta = response.usage_metadata
+    usage = {
+        "input_tokens": usage_meta.prompt_token_count if usage_meta else 0,
+        "output_tokens": usage_meta.candidates_token_count if usage_meta else 0,
+    }
+
+    return {
+        "text": text,
+        "stop_reason": stop_reason,
+        "content_blocks": content_blocks,
+        "reasoning": reasoning,
+        "usage": usage,
     }
 
 

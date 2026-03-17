@@ -605,7 +605,7 @@ def _add_common_args(parser: argparse.ArgumentParser, model_default: str = ""):
     parser.add_argument(
         "--provider", "-p",
         default="",
-        help="LLM provider: 'anthropic' or 'openai' (overrides LLM_PROVIDER env var)",
+        help="LLM provider: 'anthropic', 'openai', or 'gemini' (overrides LLM_PROVIDER env var)",
     )
     parser.add_argument(
         "--base-url",
