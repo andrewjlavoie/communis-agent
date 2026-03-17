@@ -105,15 +105,19 @@ async def _call_anthropic(
     response = await client.messages.create(**kwargs)
 
     text = ""
+    reasoning = ""
     content_blocks = []
     for block in response.content:
         block_dict = block.model_dump()
         content_blocks.append(block_dict)
         if block.type == "text":
             text += block.text
+        elif block.type == "thinking":
+            reasoning += block.thinking
 
     return {
         "text": text,
+        "reasoning": reasoning,
         "stop_reason": response.stop_reason,
         "content_blocks": content_blocks,
         "usage": {
@@ -213,14 +217,18 @@ async def _call_openai(
     choice = response.choices[0]
     text = choice.message.content or ""
 
-    # Strip <think>...</think> blocks from thinking models (Qwen3, etc.)
+    # Capture reasoning_content from thinking models (Qwen3, etc.)
+    reasoning = ""
+    if hasattr(choice.message, "reasoning_content") and choice.message.reasoning_content:
+        reasoning = choice.message.reasoning_content.strip()
+
+    # Strip <think>...</think> blocks from thinking models
     text = _THINK_RE.sub("", text).strip()
 
-    # Thinking models (Qwen3, etc.) may exhaust the token budget on reasoning,
-    # leaving content empty. If reasoning_content exists, salvage it so
-    # downstream activities don't receive an empty string.
-    if not text and hasattr(choice.message, "reasoning_content") and choice.message.reasoning_content:
-        text = choice.message.reasoning_content.strip()
+    # If content is empty but reasoning exists, salvage it so downstream
+    # activities don't receive an empty string.
+    if not text and reasoning:
+        text = reasoning
 
     # Map finish_reason to Anthropic-style stop_reason
     stop_reason_map = {
@@ -249,6 +257,7 @@ async def _call_openai(
     usage = response.usage
     return {
         "text": text,
+        "reasoning": reasoning,
         "stop_reason": stop_reason,
         "content_blocks": content_blocks,
         "usage": {

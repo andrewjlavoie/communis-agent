@@ -364,6 +364,24 @@ class SessionCLI:
                     f" | {duration_ms}[/dim]"
                 )
 
+        elif event_type == "thinking":
+            text = data.get("text", "")
+            if text:
+                console.print(Panel(
+                    f"[dim italic]{text}[/dim italic]",
+                    title="[dim italic]reasoning[/dim italic]",
+                    border_style="dim magenta",
+                    padding=(0, 1),
+                ))
+
+        elif event_type == "agent_status":
+            status = data.get("status", "")
+            detail = data.get("detail", "")
+            if status == "thinking":
+                console.print(f"[dim magenta]  ... {detail}[/dim magenta]")
+            elif status == "running_tool":
+                console.print(f"[dim yellow]  ... {detail}[/dim yellow]")
+
         elif event_type == "conversation_cleared":
             pass  # Already printed by /clear handler
 
