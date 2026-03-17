@@ -214,6 +214,8 @@ class CommunisAgent:
         final_text = ""
 
         for _ in range(MAX_FRONT_AGENT_ITERATIONS):
+            self._add_event("agent_status", {"status": "thinking", "detail": "Generating response..."})
+
             llm_response = await workflow.execute_activity(
                 call_llm,
                 args=[
@@ -228,6 +230,11 @@ class CommunisAgent:
                 start_to_close_timeout=LLM_TIMEOUT,
                 retry_policy=LLM_RETRY_POLICY,
             )
+
+            # Emit reasoning/thinking tokens if present
+            reasoning = llm_response.get("reasoning", "")
+            if reasoning:
+                self._add_event("thinking", {"text": reasoning, "source": "front_agent"})
 
             content_blocks = llm_response.get("content_blocks", [])
             text = _extract_text_from_blocks(content_blocks)
@@ -260,6 +267,13 @@ class CommunisAgent:
                     "tool_name": tool_name,
                     "tool_input": tool_input,
                     "thinking": text,  # LLM text alongside tool call
+                })
+
+                # Emit status so user sees which tool is running
+                command = tool_input.get("command", tool_input.get("description", tool_name))
+                self._add_event("agent_status", {
+                    "status": "running_tool",
+                    "detail": f"Running: {command[:60]}",
                 })
 
                 if tool_name == "run":
