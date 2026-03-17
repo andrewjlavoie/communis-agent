@@ -1,0 +1,13 @@
+# Scenario 4: Multi-turn research with context accumulation
+# 4-turn budget exercises rolling context, diverse planner role assignment,
+# and insight extraction across multiple turns.
+
+prompt: |
+  Analyze the pros and cons of microservices architecture versus monolithic
+  architecture. Cover: deployment complexity, team scaling, data consistency,
+  and debugging difficulty. Produce a structured comparison.
+turns: 4
+auto: true
+no_goal_detect: true
+dangerous: true
+max_subcommunis: 0

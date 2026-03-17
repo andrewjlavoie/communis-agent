@@ -62,6 +62,7 @@ Chat features:
 uv run python cli/main.py [run] <prompt> [options]
 
 Options:
+  --config, -c        Path to a YAML config file (see below)
   --turns, -t         Max steps (0 = indefinite with goal detection, default: 0)
   --model, -m         Model name (default: claude-sonnet-4-5-20250929)
   --provider, -p      LLM provider: 'anthropic' or 'openai' (overrides env var)
@@ -73,6 +74,39 @@ Options:
   --no-goal-detect    Disable goal completion detection (requires --turns > 0)
   --max-subcommunis   Max parallel subcommunis (0-5, default: 3)
 ```
+
+#### YAML Config Files
+
+Instead of long CLI commands, you can put run-mode settings in a YAML file:
+
+```yaml
+# research.yaml
+prompt: |
+  Investigate the trade-offs between event sourcing and traditional CRUD
+  for a multi-tenant SaaS platform. Consider consistency, scalability,
+  operational complexity, and developer experience.
+turns: 4
+model: claude-sonnet-4-5-20250929
+auto: true
+verbose: true
+output: research-output.md
+max_subcommunis: 3
+```
+
+```bash
+uv run python cli/main.py run -c research.yaml
+```
+
+All keys are optional. CLI arguments override config file values, so you can use a config file as a base and tweak individual settings on the fly:
+
+```bash
+# Use config but override turns and disable auto mode
+uv run python cli/main.py run -c research.yaml -t 6
+```
+
+A CLI prompt argument overrides the `prompt` key in the config file.
+
+**Supported keys:** `prompt`, `turns`, `model`, `provider`, `base_url`, `auto`, `output`, `verbose`, `dangerous`, `no_goal_detect`, `max_subcommunis`
 
 ### `chat`
 
@@ -311,7 +345,8 @@ communis/
 │   ├── parallel_analysis.py       # Concurrent multi-perspective analysis
 │   ├── external_client.py         # Start/monitor from any Python service
 │   └── api_server.py              # FastAPI REST wrapper
-├── tests/                         # 106 tests (90 unit + 16 integration)
+├── tests/                         # 90 unit + 16 integration + 10 full integration
+│   └── full_integration/          # End-to-end user journey tests (YAML configs × model backends)
 ├── COMPOSABILITY.md               # Patterns for using communis as a building block
 ├── PROMPTS.md                     # All prompts extracted for reference
 └── CLAUDE.md                      # AI agent development instructions
@@ -366,11 +401,51 @@ uv run python cli/main.py run "your prompt" -t 3 -p openai -m qwen/qwen3.5-9b
 
 ## Tests
 
+Three tiers of test coverage, from fast unit checks to full end-to-end user journeys against live LLMs.
+
+### Unit Tests (90 tests)
+
+Mocked LLM calls, no external dependencies. Fast — runs in ~10s.
+
 ```bash
-uv run pytest tests/ -v                                                         # all 106 tests
 uv run pytest tests/ --ignore=tests/test_integration_lmstudio.py \
-                     --ignore=tests/test_integration_session.py -v               # 90 unit tests only
-uv run pytest tests/test_integration_lmstudio.py tests/test_integration_session.py -v -s  # 16 integration tests (real LLM)
+                     --ignore=tests/test_integration_session.py \
+                     --ignore=tests/full_integration/ -v
+```
+
+### Integration Tests (16 tests)
+
+Activity-level and workflow-level tests against a real LLM endpoint. Validates tool use decisions, output quality, delegation logic, and the approval flow.
+
+```bash
+uv run pytest tests/test_integration_lmstudio.py tests/test_integration_session.py -v -s
+```
+
+### Full Integration Tests (10 tests)
+
+End-to-end user journey tests that load YAML config files and execute the full orchestrator workflow through Temporal. Each scenario runs against two model backends (Anthropic Haiku and local Qwen), testing the same pipeline across different providers.
+
+| Scenario | Turns | What it validates |
+|----------|-------|-------------------|
+| `quick_sanity` | 2 fixed | Core pipeline works end-to-end |
+| `goal_detect_essay` | Up to 5 | Planner signals early goal completion |
+| `tool_use_filesystem` | 3 | Shell tool loop — file creation and verification |
+| `multi_turn_research` | 4 fixed | Context accumulation, diverse roles, insight extraction |
+| `subcommunis_parallel` | Up to 8 | Parallel subcommunis spawning |
+
+Uses a single shared Temporal server for the session (connects to `localhost:7233`, or starts one automatically).
+
+```bash
+uv run pytest tests/full_integration/ -v -s                    # all scenarios, both backends
+uv run pytest tests/full_integration/ -v -s -k "haiku"         # Anthropic Haiku only
+uv run pytest tests/full_integration/ -v -s -k "qwen_local"    # local Qwen only
+uv run pytest tests/full_integration/ -v -s -k "quick_sanity"  # single scenario
+```
+
+### All Tests
+
+```bash
+uv run pytest tests/ -v -s                                     # everything (requires LLM endpoints)
 ```
 
 ## Why Temporal

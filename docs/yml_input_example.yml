@@ -1,0 +1,97 @@
+# communis run-mode YAML config
+#
+# Use with: uv run python cli/main.py run -c docs/yml_input_example.yml
+#
+# All fields are optional. CLI arguments override values set here.
+# A positional prompt on the CLI overrides the 'prompt' field below.
+
+
+# --- Prompt ---
+
+# The task or question for the agent to work on.
+# Supports multi-line text via YAML block scalars (| or >).
+# This is the only field with no default — either this or a CLI prompt is required.
+prompt: |
+  Investigate the trade-offs between event sourcing and traditional CRUD
+  for a multi-tenant SaaS platform. Consider consistency, scalability,
+  operational complexity, and developer experience.
+
+
+# --- Turn Control ---
+
+# Maximum number of iterative steps the agent will take.
+#   0  = indefinite mode — the agent runs until it detects goal completion
+#        (capped at 50 turns as a safety limit).
+#   >0 = fixed budget — the agent runs exactly this many turns, or fewer
+#        if goal detection stops it early (unless no_goal_detect is set).
+# CLI: --turns, -t
+turns: 4
+
+# When true, disables the planner's ability to stop early when it believes
+# the goal is complete. The agent will always run for exactly 'turns' steps.
+# Requires turns > 0.
+# CLI: --no-goal-detect
+no_goal_detect: false
+
+
+# --- Model ---
+
+# The LLM model to use for planning and turn execution.
+# This is the "primary" model tier — the expensive, capable one.
+# The "fast" model tier (used for summarization, insight extraction) is
+# controlled separately via the FAST_MODEL env var, not this config.
+# CLI: --model, -m
+model: claude-sonnet-4-5-20250929
+
+# LLM provider backend. Determines which SDK is used for API calls.
+#   "anthropic" = Anthropic Messages API (requires ANTHROPIC_API_KEY env var)
+#   "openai"    = OpenAI-compatible API (LM Studio, Ollama, vLLM, etc.)
+#   ""          = use the LLM_PROVIDER env var (default: "anthropic")
+# CLI: --provider, -p
+provider: ""
+
+# Base URL for an OpenAI-compatible API endpoint.
+# Only used when provider is "openai". Ignored for Anthropic.
+#   ""  = use the OPENAI_BASE_URL env var (default: http://localhost:1234/v1)
+# CLI: --base-url
+base_url: ""
+
+
+# --- Execution Mode ---
+
+# When true, the agent runs all turns without pausing for human feedback
+# between steps. Without this, the CLI prompts you for feedback after
+# each turn (120s timeout before auto-continuing).
+# CLI: --auto, -a
+auto: true
+
+# When true, all tool calls (shell commands) are auto-approved without
+# human confirmation. By default, every 'run' tool call shows the command
+# and waits for y/n approval.
+# Use with caution — the agent can execute arbitrary shell commands.
+# CLI: --dangerous
+dangerous: false
+
+
+# --- Subcommunis ---
+
+# Maximum number of parallel subcommunis the planner can spawn per step.
+# Subcommunis are independent child workflows that run sub-tasks in parallel
+# (e.g., "research X" and "research Y" simultaneously).
+#   0 = disabled — the planner cannot spawn subcommunis
+#   1-5 = allowed range
+# CLI: --max-subcommunis
+max_subcommunis: 3
+
+
+# --- Output ---
+
+# Path to save a markdown file with the full session output (turn content,
+# insights, token usage, and a summary table). Empty string = no file output.
+# CLI: --output, -o
+output: ""
+
+# When true, prints detailed progress: timing, file paths, Temporal
+# connection info, and a per-turn token breakdown table at the end.
+# CLI: --verbose, -v
+verbose: false

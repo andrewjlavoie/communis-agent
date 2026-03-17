@@ -1,0 +1,10 @@
+# Scenario 1: Minimal 2-turn fixed run (fast smoke test)
+# Exercises the full pipeline: planner -> turn agent -> insight extraction -> workspace I/O
+# No goal detection, no subcommunis — just verifies the core loop works.
+
+prompt: "List three advantages of using Python for scripting tasks."
+turns: 2
+auto: true
+no_goal_detect: true
+dangerous: true
+max_subcommunis: 0

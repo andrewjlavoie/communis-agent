@@ -1,0 +1,12 @@
+# Scenario 3: Task requiring tool use
+# The agent must use the run tool to create a file and verify it.
+# Validates the full tool use loop: LLM decides to call run -> approval (auto) -> execute -> result fed back.
+
+prompt: |
+  Create a file at /tmp/communis-integration-test/output.txt containing
+  the text "integration test passed". Then verify the file exists by
+  reading it back.
+turns: 3
+auto: true
+dangerous: true
+max_subcommunis: 0
