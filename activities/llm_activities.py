@@ -216,6 +216,12 @@ async def _call_openai(
     # Strip <think>...</think> blocks from thinking models (Qwen3, etc.)
     text = _THINK_RE.sub("", text).strip()
 
+    # Thinking models (Qwen3, etc.) may exhaust the token budget on reasoning,
+    # leaving content empty. If reasoning_content exists, salvage it so
+    # downstream activities don't receive an empty string.
+    if not text and hasattr(choice.message, "reasoning_content") and choice.message.reasoning_content:
+        text = choice.message.reasoning_content.strip()
+
     # Map finish_reason to Anthropic-style stop_reason
     stop_reason_map = {
         "stop": "end_turn",
@@ -328,6 +334,9 @@ async def plan_next_turn(context: str, provider: str = "", base_url: str = "", m
 @activity.defn
 async def extract_key_insights(content: str, provider: str = "", base_url: str = "", model: str = "") -> list[str]:
     """Use a fast model to extract key insights from turn content."""
+    if not content or not content.strip():
+        return ["(no content produced — model may have exhausted token budget on reasoning)"]
+
     response = await _call_llm(
         messages=[{"role": "user", "content": content}],
         system_prompt=EXTRACT_INSIGHTS_PROMPT,
@@ -347,6 +356,9 @@ async def extract_key_insights(content: str, provider: str = "", base_url: str =
 @activity.defn
 async def summarize_artifacts(artifacts_text: str, provider: str = "", base_url: str = "", model: str = "") -> str:
     """Use a fast model to summarize older turn artifacts."""
+    if not artifacts_text or not artifacts_text.strip():
+        return "(no content to summarize)"
+
     response = await _call_llm(
         messages=[{"role": "user", "content": artifacts_text}],
         system_prompt=SUMMARIZE_ARTIFACTS_PROMPT,
