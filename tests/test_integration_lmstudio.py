@@ -4,7 +4,7 @@ These tests make ACTUAL LLM calls — nothing is mocked.
 Requires LM Studio running at http://192.168.5.71:1234 with qwen/qwen3.5-9b loaded.
 
 Run:
-    uv sync --extra openai
+    uv sync --extra dev
     uv run pytest tests/test_integration_lmstudio.py -v -s
 """
 
@@ -30,7 +30,6 @@ def configure_lmstudio():
         "default_model": mod.DEFAULT_MODEL,
         "fast_model": mod.FAST_MODEL,
         "fast_max_tokens": mod.FAST_MAX_TOKENS,
-        "openai_client": mod._openai_client,
     }
 
     mod.LLM_PROVIDER = "openai"
@@ -38,7 +37,6 @@ def configure_lmstudio():
     mod.FAST_MODEL = LM_STUDIO_MODEL
     # Thinking models (Qwen3, etc.) need extra headroom for reasoning tokens
     mod.FAST_MAX_TOKENS = 4096
-    mod._openai_client = None
 
     os.environ["OPENAI_BASE_URL"] = LM_STUDIO_BASE_URL
     os.environ["OPENAI_API_KEY"] = "lm-studio"
@@ -49,7 +47,6 @@ def configure_lmstudio():
     mod.DEFAULT_MODEL = saved["default_model"]
     mod.FAST_MODEL = saved["fast_model"]
     mod.FAST_MAX_TOKENS = saved["fast_max_tokens"]
-    mod._openai_client = saved["openai_client"]
 
 
 # ────────────────────────────────────────────

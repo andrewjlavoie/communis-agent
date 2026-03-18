@@ -174,9 +174,6 @@ def configure_llm_backend(model_backend):
         "default_model": mod.DEFAULT_MODEL,
         "fast_model": mod.FAST_MODEL,
         "fast_max_tokens": mod.FAST_MAX_TOKENS,
-        "anthropic_client": mod._anthropic_client,
-        "openai_clients": mod._openai_clients.copy(),
-        "gemini_client": mod._gemini_client,
     }
     saved_env: dict[str, str | None] = {}
 
@@ -184,9 +181,6 @@ def configure_llm_backend(model_backend):
     mod.DEFAULT_MODEL = model_backend["model"]
     mod.FAST_MODEL = model_backend["fast_model"]
     mod.FAST_MAX_TOKENS = model_backend["fast_max_tokens"]
-    mod._anthropic_client = None
-    mod._openai_clients.clear()
-    mod._gemini_client = None
 
     for key, val in model_backend["env_overrides"].items():
         saved_env[key] = os.environ.get(key)
@@ -198,9 +192,6 @@ def configure_llm_backend(model_backend):
     mod.DEFAULT_MODEL = saved["default_model"]
     mod.FAST_MODEL = saved["fast_model"]
     mod.FAST_MAX_TOKENS = saved["fast_max_tokens"]
-    mod._anthropic_client = saved["anthropic_client"]
-    mod._openai_clients = saved["openai_clients"]
-    mod._gemini_client = saved["gemini_client"]
 
     for key, original in saved_env.items():
         if original is None:

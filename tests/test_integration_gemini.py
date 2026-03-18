@@ -7,7 +7,7 @@ Tests actual Gemini API calls through our activity layer to verify:
 - Tool use works end-to-end (call + result round-trip)
 
 Run:
-    uv sync --extra gemini --extra dev
+    uv sync --extra dev
     GOOGLE_API_KEY=... uv run pytest tests/test_integration_gemini.py -v -s
 """
 from __future__ import annotations
@@ -15,8 +15,6 @@ from __future__ import annotations
 import os
 
 import pytest
-
-pytest.importorskip("google.genai", reason="google-genai not installed (uv sync --extra gemini)")
 
 GEMINI_MODEL = "gemini-2.5-flash-lite-preview"
 
@@ -36,14 +34,12 @@ def configure_gemini():
         "default_model": mod.DEFAULT_MODEL,
         "fast_model": mod.FAST_MODEL,
         "fast_max_tokens": mod.FAST_MAX_TOKENS,
-        "gemini_client": mod._gemini_client,
     }
 
     mod.LLM_PROVIDER = "gemini"
     mod.DEFAULT_MODEL = GEMINI_MODEL
     mod.FAST_MODEL = GEMINI_MODEL
     mod.FAST_MAX_TOKENS = 0
-    mod._gemini_client = None
 
     yield
 
@@ -51,7 +47,6 @@ def configure_gemini():
     mod.DEFAULT_MODEL = saved["default_model"]
     mod.FAST_MODEL = saved["fast_model"]
     mod.FAST_MAX_TOKENS = saved["fast_max_tokens"]
-    mod._gemini_client = saved["gemini_client"]
 
 
 @pytest.mark.asyncio
@@ -186,7 +181,6 @@ async def test_tool_use_basic():
     )
     assert tool_blocks[0]["name"] == "search_files"
     assert "id" in tool_blocks[0]
-    assert tool_blocks[0]["id"].startswith("gemini_")
     assert result["stop_reason"] == "tool_use"
 
 

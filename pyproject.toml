@@ -5,19 +5,13 @@ description = "Temporal AI Agent for Iterative Idea Development"
 requires-python = ">=3.11"
 dependencies = [
     "temporalio>=1.8.0",
-    "anthropic>=0.40.0",
+    "litellm>=1.40.0",
     "python-dotenv>=1.0.0",
     "rich>=13.0.0",
     "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
-openai = [
-    "openai>=1.0.0",
-]
-gemini = [
-    "google-genai>=1.0.0",
-]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
