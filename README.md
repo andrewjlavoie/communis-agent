@@ -1,6 +1,6 @@
 # communis
 
-Durable AI agents on [Temporal](https://temporal.io/). Two modes: a self-directing iterative work loop (`run`) and an interactive agent REPL (`chat`) with background task delegation. Works with [Claude](https://docs.anthropic.com/) or any OpenAI-compatible API (LM Studio, Ollama, vLLM, etc.).
+Durable AI agents on [Temporal](https://temporal.io/). Two modes: a self-directing iterative work loop (`run`) and an interactive agent REPL (`chat`) with background task delegation. Works with [Claude](https://docs.anthropic.com/), [Google Gemini](https://ai.google.dev/), or any OpenAI-compatible API (LM Studio, Ollama, vLLM, etc.) via [LiteLLM](https://github.com/BerriAI/litellm).
 
 ## Quick Start
 
@@ -65,7 +65,7 @@ Options:
   --config, -c        Path to a YAML config file (see below)
   --turns, -t         Max steps (0 = indefinite with goal detection, default: 0)
   --model, -m         Model name (default: claude-sonnet-4-5-20250929)
-  --provider, -p      LLM provider: 'anthropic' or 'openai' (overrides env var)
+  --provider, -p      LLM provider: 'anthropic', 'openai', or 'gemini' (overrides env var)
   --base-url          Base URL for OpenAI-compatible API (overrides env var)
   --auto, -a          Skip feedback prompts, run straight through
   --output, -o        Save session output to a markdown file
@@ -116,7 +116,7 @@ uv run python cli/main.py chat [options]
 Options:
   --user, -u          Username for workflow IDs (default: $USER)
   --model, -m         Model name (default: env DEFAULT_MODEL or claude-sonnet-4-5-20250929)
-  --provider, -p      LLM provider: 'anthropic' or 'openai' (overrides env var)
+  --provider, -p      LLM provider: 'anthropic', 'openai', or 'gemini' (overrides env var)
   --base-url          Base URL for OpenAI-compatible API (overrides env var)
   --verbose, -v       Show tool calls, results, and agent thinking
   --dangerous         Auto-approve all tool calls (no human confirmation)
@@ -321,7 +321,7 @@ communis/
 │   ├── communis_prompts.py        # Run-mode prompts (see PROMPTS.md)
 │   └── session_prompts.py         # Front agent system prompt
 ├── activities/
-│   ├── llm_activities.py          # LLM calls — Anthropic + OpenAI backends (6 activities)
+│   ├── llm_activities.py          # LLM calls via LiteLLM — all providers (6 activities)
 │   ├── session_activities.py      # Front agent LLM call (1 activity)
 │   ├── tool_activities.py         # Shell command execution (1 activity)
 │   └── workspace_activities.py    # Workspace file I/O (8 activities)
@@ -356,8 +356,9 @@ communis/
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LLM_PROVIDER` | `anthropic` | LLM backend: `anthropic` or `openai` |
+| `LLM_PROVIDER` | `anthropic` | LLM backend: `anthropic`, `openai`, or `gemini` |
 | `ANTHROPIC_API_KEY` | *(required for anthropic)* | Anthropic API key |
+| `GOOGLE_API_KEY` | *(required for gemini)* | Google AI API key |
 | `OPENAI_BASE_URL` | `http://localhost:1234/v1` | Base URL for OpenAI-compatible API |
 | `OPENAI_API_KEY` | `lm-studio` | API key for OpenAI-compatible endpoint |
 | `DEFAULT_MODEL` | `claude-sonnet-4-5-20250929` | Model for planning, turns, front agent, sub-agents |
@@ -367,13 +368,23 @@ communis/
 | `TEMPORAL_ADDRESS` | `localhost:7233` | Temporal server |
 | `COMMUNIS_WORKSPACE` | `.communis` | Base directory for workspace files |
 
-### Using Local Models (LM Studio, Ollama, etc.)
+### Switching Providers
 
-Any OpenAI-compatible API works. Install the optional dependency, set a few env vars, and go:
+LLM routing is handled by [LiteLLM](https://github.com/BerriAI/litellm) — no optional dependency groups to install. Just set env vars and go.
+
+**Google Gemini:**
 
 ```bash
-uv sync --extra openai
+# In your .env:
+LLM_PROVIDER=gemini
+GOOGLE_API_KEY=AIza...
+DEFAULT_MODEL=gemini-2.5-flash-lite-preview
+FAST_MODEL=gemini-2.5-flash-lite-preview
+```
 
+**Local models (LM Studio, Ollama, vLLM, etc.):**
+
+```bash
 # In your .env:
 LLM_PROVIDER=openai
 OPENAI_BASE_URL=http://localhost:1234/v1   # LM Studio default
@@ -389,11 +400,14 @@ Common endpoints:
 
 **Thinking models** (Qwen3, DeepSeek-R1, etc.) generate `<think>...</think>` reasoning tokens that consume the max_tokens budget before producing output. communis automatically strips these from responses. Set `FAST_MAX_TOKENS=4096` to give the utility calls enough headroom for reasoning + output.
 
-You can keep both providers configured in `.env` and switch at runtime:
+You can keep multiple providers configured in `.env` and switch at runtime:
 
 ```bash
 # Use Claude (default)
 uv run python cli/main.py run "your prompt" -t 3
+
+# Use Gemini
+uv run python cli/main.py run "your prompt" -t 3 -p gemini -m gemini-2.5-flash-lite-preview
 
 # Use local model
 uv run python cli/main.py run "your prompt" -t 3 -p openai -m qwen/qwen3.5-9b
@@ -410,6 +424,7 @@ Mocked LLM calls, no external dependencies. Fast — runs in ~10s.
 ```bash
 uv run pytest tests/ --ignore=tests/test_integration_lmstudio.py \
                      --ignore=tests/test_integration_session.py \
+                     --ignore=tests/test_integration_gemini.py \
                      --ignore=tests/full_integration/ -v
 ```
 
@@ -418,7 +433,8 @@ uv run pytest tests/ --ignore=tests/test_integration_lmstudio.py \
 Activity-level and workflow-level tests against a real LLM endpoint. Validates tool use decisions, output quality, delegation logic, and the approval flow.
 
 ```bash
-uv run pytest tests/test_integration_lmstudio.py tests/test_integration_session.py -v -s
+uv run pytest tests/test_integration_lmstudio.py tests/test_integration_session.py -v -s  # OpenAI-compat
+uv run pytest tests/test_integration_gemini.py -v -s                                      # Gemini
 ```
 
 ### Full Integration Tests (10 tests)
