@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+import yaml
 from dotenv import load_dotenv
 from rich.console import Console
 from rich.markdown import Markdown
@@ -561,6 +562,28 @@ def _prompt_for_feedback() -> str | None:
     return feedback if feedback else None
 
 
+def _load_config_file(path: str) -> dict:
+    """Load a YAML config file and return a dict of run-mode settings.
+
+    Supported keys (all optional):
+        prompt, turns, model, provider, base_url, auto, output,
+        verbose, dangerous, goal_detect, max_subcommunis
+    """
+    p = Path(path)
+    if p.suffix not in (".yaml", ".yml"):
+        raise ValueError(f"Config file must be .yaml or .yml, got: {p.suffix}")
+    if not p.exists():
+        raise FileNotFoundError(f"Config file not found: {path}")
+
+    with open(p) as f:
+        data = yaml.safe_load(f)
+
+    if not isinstance(data, dict):
+        raise ValueError(f"Config file must contain a YAML mapping, got: {type(data).__name__}")
+
+    return data
+
+
 def _add_common_args(parser: argparse.ArgumentParser, model_default: str = ""):
     """Add args shared between 'run' and 'chat' subcommands.
 
@@ -582,7 +605,7 @@ def _add_common_args(parser: argparse.ArgumentParser, model_default: str = ""):
     parser.add_argument(
         "--provider", "-p",
         default="",
-        help="LLM provider: 'anthropic' or 'openai' (overrides LLM_PROVIDER env var)",
+        help="LLM provider: 'anthropic', 'openai', or 'gemini' (overrides LLM_PROVIDER env var)",
     )
     parser.add_argument(
         "--base-url",
@@ -614,7 +637,12 @@ def main():
     # --- 'run' subcommand (also default when positional arg is given) ---
     # For backward compatibility, we support both `communis run "prompt"` and `communis "prompt"`
     run_parser = subparsers.add_parser("run", help="Run a single-shot task (default)")
-    run_parser.add_argument("idea", metavar="prompt", help="The prompt or task to work on")
+    run_parser.add_argument("idea", metavar="prompt", nargs="?", default=None, help="The prompt or task to work on")
+    run_parser.add_argument(
+        "--config", "-c",
+        default="",
+        help="Path to a YAML config file (see README for format)",
+    )
     _add_common_args(run_parser, model_default=DEFAULT_MODEL_STRING)
     run_parser.add_argument(
         "--turns", "-t", type=int, default=0,
@@ -658,14 +686,15 @@ def main():
         return
 
     if args.command == "run":
-        idea = args.idea
+        config_path = args.config
     elif args.command is None:
         # Backward compatibility: if no subcommand, treat first positional as idea
         # Re-parse with the old-style parser
         legacy_parser = argparse.ArgumentParser(
             description="communis — Self-Directing Iterative Work Loop"
         )
-        legacy_parser.add_argument("idea", metavar="prompt", help="The prompt or task to work on")
+        legacy_parser.add_argument("idea", metavar="prompt", nargs="?", default=None, help="The prompt or task to work on")
+        legacy_parser.add_argument("--config", "-c", default="", help="Path to a YAML config file")
         _add_common_args(legacy_parser, model_default=DEFAULT_MODEL_STRING)
         legacy_parser.add_argument("--turns", "-t", type=int, default=0)
         legacy_parser.add_argument("--auto", "-a", action="store_true")
@@ -673,29 +702,55 @@ def main():
         legacy_parser.add_argument("--no-goal-detect", action="store_true")
         legacy_parser.add_argument("--max-subcommunis", type=int, default=3)
         args = legacy_parser.parse_args()
-        idea = args.idea
+        config_path = args.config
     else:
         parser.print_help()
         return
 
-    # Validation
-    if args.no_goal_detect and args.turns <= 0:
-        console.print("[red]Error: --no-goal-detect requires --turns > 0[/red]")
+    # Load YAML config file if provided, then let CLI args override
+    file_cfg: dict = {}
+    if config_path:
+        try:
+            file_cfg = _load_config_file(config_path)
+        except (FileNotFoundError, ValueError) as e:
+            console.print(f"[red]Error: {e}[/red]")
+            return
+
+    # Resolve each setting: CLI arg (if explicitly set) > config file > default
+    idea = args.idea if args.idea is not None else file_cfg.get("prompt", "")
+    if not idea:
+        console.print("[red]Error: No prompt provided. Pass a prompt argument or set 'prompt' in the config file.[/red]")
         return
 
-    max_subcommunis = max(0, min(5, args.max_subcommunis))
-    goal_detect = not args.no_goal_detect
+    turns = args.turns if args.turns != 0 else file_cfg.get("turns", 0)
+    model = args.model if args.model != DEFAULT_MODEL_STRING else file_cfg.get("model", DEFAULT_MODEL_STRING)
+    auto = args.auto or file_cfg.get("auto", False)
+    verbose = args.verbose or file_cfg.get("verbose", False)
+    provider = args.provider if args.provider else file_cfg.get("provider", "")
+    base_url = args.base_url if args.base_url else file_cfg.get("base_url", "")
+    output = args.output if args.output else file_cfg.get("output", "")
+    dangerous = args.dangerous or file_cfg.get("dangerous", False)
+    no_goal_detect = args.no_goal_detect if hasattr(args, "no_goal_detect") and args.no_goal_detect else file_cfg.get("no_goal_detect", False)
+    max_sub = args.max_subcommunis if args.max_subcommunis != 3 else file_cfg.get("max_subcommunis", 3)
+
+    # Validation
+    if no_goal_detect and turns <= 0:
+        console.print("[red]Error: no_goal_detect requires turns > 0[/red]")
+        return
+
+    max_subcommunis = max(0, min(5, max_sub))
+    goal_detect = not no_goal_detect
 
     asyncio.run(run_cli(
         idea,
-        max_turns=args.turns,
-        model=args.model,
-        auto=args.auto,
-        verbose=args.verbose,
-        provider=args.provider,
-        base_url=args.base_url,
-        output=args.output,
-        dangerous=args.dangerous,
+        max_turns=turns,
+        model=model,
+        auto=auto,
+        verbose=verbose,
+        provider=provider,
+        base_url=base_url,
+        output=output,
+        dangerous=dangerous,
         goal_complete_detection=goal_detect,
         max_subcommunis=max_subcommunis,
     ))

@@ -1,0 +1,9 @@
+# Scenario 2: Goal detection early stop
+# Budget of 5 turns, but the task is simple enough that the planner should
+# signal goal_complete before exhausting the budget.
+
+prompt: "Write a concise 3-paragraph essay explaining why unit testing is important in software development."
+turns: 5
+auto: true
+dangerous: true
+max_subcommunis: 0

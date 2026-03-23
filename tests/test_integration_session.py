@@ -15,7 +15,7 @@ Configure via env vars:
     INTEGRATION_LLM_MODEL     (default: value from .env or openai/gpt-oss-20b)
 
 Run:
-    uv sync --extra openai --extra dev
+    uv sync --extra dev
     uv run pytest tests/test_integration_session.py -v -s
     uv run pytest tests/test_integration_session.py -v -s -k "not full_workflow"  # fast only
 """
@@ -52,14 +52,12 @@ def configure_llm():
         "default_model": mod.DEFAULT_MODEL,
         "fast_model": mod.FAST_MODEL,
         "fast_max_tokens": mod.FAST_MAX_TOKENS,
-        "openai_clients": mod._openai_clients.copy(),
     }
 
     mod.LLM_PROVIDER = LLM_PROVIDER
     mod.DEFAULT_MODEL = LLM_MODEL
     mod.FAST_MODEL = LLM_MODEL
     mod.FAST_MAX_TOKENS = 4096
-    mod._openai_clients.clear()
 
     os.environ["OPENAI_BASE_URL"] = LLM_BASE_URL
     os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY", "lm-studio")
@@ -70,7 +68,6 @@ def configure_llm():
     mod.DEFAULT_MODEL = saved["default_model"]
     mod.FAST_MODEL = saved["fast_model"]
     mod.FAST_MAX_TOKENS = saved["fast_max_tokens"]
-    mod._openai_clients = saved["openai_clients"]
 
 
 @pytest.fixture

@@ -1,0 +1,13 @@
+# Scenario 5: Task that may trigger subcommunis spawning
+# The planner may choose to decompose this into parallel sub-tasks.
+# Not guaranteed — the LLM decides. Assertions are soft.
+
+prompt: |
+  Research two independent topics in parallel:
+  1. The history of the Python programming language
+  2. The history of the Rust programming language
+  Synthesize the findings into a comparison.
+turns: 8
+auto: true
+dangerous: true
+max_subcommunis: 2
